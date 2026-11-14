@@ -280,8 +280,21 @@ function chiama(url, corpo, h, metodo, referer) {
   try { r = UrlFetchApp.fetch(url, opz); } catch (err) { throw new ErroreArgo('Argo non è raggiungibile in questo momento.', 502); }
   var stato = r.getResponseCode(), servizio = url.split('/rest/').pop().split('?')[0];
   if (stato === 401) throw new ErroreArgo('Sessione Argo scaduta: entra di nuovo con le credenziali Argo.', 401);
-  if (stato >= 400) throw new ErroreArgo('Argo ha risposto ' + stato + ' a «' + servizio + '»', 502);
+  if (stato >= 400) {
+    var spiega = motivoArgo(r.getContentText());
+    console.log('Argo ' + stato + ' a ' + servizio + ': ' + String(r.getContentText()).slice(0, 500));
+    throw new ErroreArgo(spiega ? 'Argo: ' + spiega : 'Argo ha risposto ' + stato + ' a «' + servizio + '»', 502);
+  }
   try { return JSON.parse(r.getContentText() || '{}'); } catch (err) { throw new ErroreArgo('Risposta non leggibile da «' + servizio + '»', 502); }
+}
+
+/** Il messaggio che Argo mette nella risposta di errore (es. {success:false, msg:"..."}), se c'è. */
+function motivoArgo(testo) {
+  var t = String(testo || '').trim(), o = null;
+  try { o = JSON.parse(t); } catch (err) { return /^</.test(t) ? '' : t.slice(0, 200); }
+  if (!o || typeof o !== 'object') return '';
+  var m = o.msg || o.message || o.messaggio || o.error_description || o.error || (o.errors && JSON.stringify(o.errors)) || '';
+  return String(m).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
 var PARTICOLARITA = { MOTPERS: 'motivi_personali', FERIE: 'ferie', ORARIA: 'permesso_breve', VISMEDORA: 'visita_oraria',

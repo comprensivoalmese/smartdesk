@@ -177,6 +177,23 @@ def accedi(utente, password, assenze=False):
 
 
 # ---------------------------------------------------------------- programma Personale (sola lettura)
+def _motivo_argo(e):
+    """Il messaggio che Argo mette nella risposta di errore (es. {"success": false, "msg": "..."}), se c'è."""
+    try:
+        t = e.read().decode("utf-8", "replace").strip()
+    except Exception:
+        return ""
+    try:
+        o = json.loads(t)
+    except ValueError:
+        return "" if t.startswith("<") else t[:200]
+    if not isinstance(o, dict):
+        return ""
+    m = o.get("msg") or o.get("message") or o.get("messaggio") or o.get("error_description") or o.get("error") \
+        or (json.dumps(o["errors"], ensure_ascii=False) if o.get("errors") else "")
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", str(m))).strip()[:200]
+
+
 def _json(url, corpo=None, intestazioni=None, chi="il programma Personale", referer="/argopersonale/", metodo="POST"):
     """POST (o PUT) JSON a un servizio Argo (programma Personale o DidUP)."""
     h = {"User-Agent": AGENTE, "Accept": "application/json", "Origin": PORTALE, "Referer": PORTALE + referer}
@@ -192,7 +209,8 @@ def _json(url, corpo=None, intestazioni=None, chi="il programma Personale", refe
     except urllib.error.HTTPError as e:
         if e.code == 401:
             raise ErroreArgo(f"{chi}: sessione scaduta, rientra con le credenziali Argo")
-        raise ErroreArgo(f"{chi} ha risposto {e.code} a «{servizio}»")
+        spiega = _motivo_argo(e)
+        raise ErroreArgo(f"{chi}: {spiega}" if spiega else f"{chi} ha risposto {e.code} a «{servizio}»")
     except (urllib.error.URLError, TimeoutError, OSError):
         raise ErroreArgo(f"{chi} non è raggiungibile")
     except ValueError:
