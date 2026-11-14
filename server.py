@@ -871,7 +871,7 @@ def utente_da_argo(c, digitato, claims):
     for x in c.execute("SELECT * FROM utenti WHERE argo_utente<>''").fetchall():
         if x["argo_utente"].lower() in chiavi:
             if not x["attivo"]:
-                raise Errore("Il tuo account di WolfDesk è disattivato: chiedi alla segreteria.", 403)
+                raise Errore("Il tuo account di SmartDesk è disattivato: chiedi alla segreteria.", 403)
             if x["cognome"] == "(da completare)" and idn["cognome"]:
                 c.execute("UPDATE utenti SET nome=?, cognome=? WHERE id=?", (idn["nome"] or x["nome"], idn["cognome"], x["id"]))
             return c.execute("SELECT * FROM utenti WHERE id=?", (x["id"],)).fetchone()
@@ -882,7 +882,7 @@ def utente_da_argo(c, digitato, claims):
             c.execute("UPDATE utenti SET argo_utente=? WHERE id=?", (digitato.lower(), cand[0]["id"]))
             return c.execute("SELECT * FROM utenti WHERE id=?", (cand[0]["id"],)).fetchone()
     if imp.get("argo_nuovi") != "1":
-        raise Errore("Le credenziali Argo sono giuste, ma il tuo account non è ancora collegato a WolfDesk: "
+        raise Errore("Le credenziali Argo sono giuste, ma il tuo account non è ancora collegato a SmartDesk: "
                      "chiedi alla segreteria di inserire il tuo nome utente Argo nella tua scheda.", 403)
     codice = imp.get("argo_codice_scuola", "").strip().upper()
     if idn["codice_da_utente"]:
@@ -911,8 +911,16 @@ def utente_da_argo(c, digitato, claims):
     return c.execute("SELECT * FROM utenti WHERE id=?", (cur.lastrowid,)).fetchone()
 
 
-def nuova_sessione(c, user):
+SESSIONI_DIDUP = {}  # token SmartDesk -> sessione DidUP (solo in memoria: al riavvio si rientra con Argo)
+SESSIONI_DIDUP_ERRORE = {}
+
+
+def nuova_sessione(c, user, didup=None, didup_errore=""):
     tok = secrets.token_urlsafe(32)
+    if didup:
+        SESSIONI_DIDUP[tok] = dict(didup, utente_id=user["id"])
+    elif didup_errore:
+        SESSIONI_DIDUP_ERRORE[tok] = didup_errore
     c.execute("DELETE FROM sessioni WHERE scade<?", (time.time(),))
     c.execute("INSERT INTO sessioni VALUES (?,?,?)", (tok, user["id"], time.time() + DURATA_SESSIONE))
     r = Risposta(json.dumps({"ok": True}).encode())
@@ -966,7 +974,7 @@ def api_accesso(c, u, m, corpo, q, req):
                            "richieste": len(personale.get("richieste", []))}, f, indent=1)
         except OSError:
             pass
-        return nuova_sessione(c, user)
+        return nuova_sessione(c, user, personale.get("didup"), personale.get("didup_errore", ""))
     user = c.execute("SELECT * FROM utenti WHERE username=? AND attivo=1", (nome_ut.lower(),)).fetchone()
     if not user or not password_giusta(pw, user):
         TENTATIVI[ip] = (n + 1 if time.time() - t0 < 600 else 1, time.time())
@@ -979,9 +987,125 @@ def api_accesso(c, u, m, corpo, q, req):
 @rotta("POST", "/api/esci")
 def api_esci(c, u, m, corpo, q, req):
     c.execute("DELETE FROM sessioni WHERE token=?", (req.token,))
+    SESSIONI_DIDUP.pop(req.token, None)
+    SESSIONI_DIDUP_ERRORE.pop(req.token, None)
     r = Risposta(b'{"ok":true}')
     r.intestazioni["Set-Cookie"] = "sp_sessione=; Path=/; Max-Age=0"
     return r
+
+
+# ---------------------------------------------------------------- bacheca DidUP: presa visione e adesione
+ADESIONI = {"A": "Aderisco", "N": "Non aderisco", "X": "Non ho ancora deciso"}
+
+
+def sessione_didup(req, u):
+    """La sessione DidUP aperta all'accesso con Argo, se c'è ed è ancora valida."""
+    s = SESSIONI_DIDUP.get(req.token)
+    if not s or s["utente_id"] != u["id"]:
+        motivo = SESSIONI_DIDUP_ERRORE.get(req.token)
+        raise Errore(("DidUP non disponibile: " + motivo) if motivo else
+                     "Per confermare le circolari di DidUP entra con le credenziali Argo.", 409)
+    if s.get("scade") and time.time() > s["scade"] - 30:
+        SESSIONI_DIDUP.pop(req.token, None)
+        raise Errore("La sessione Argo è scaduta: esci e rientra con le credenziali Argo.", 409)
+    return s
+
+
+def cartella_didup(utente_id, pk):
+    return os.path.join(DATI, "didup-allegati", str(int(utente_id)), str(int(pk)))
+
+
+def allegati_didup(utente_id, pk):
+    d = cartella_didup(utente_id, pk)
+    nomi = sorted(os.listdir(d)) if os.path.isdir(d) else []
+    return [{"nome": n, "url": f"/api/didup/allegato/{int(pk)}/{i}"} for i, n in enumerate(nomi)]
+
+
+def messaggio_didup(x, utente_id):
+    ad_rich = any(x.get(k) for k in ("richiestaAd", "docentiAd", "personaleAtaAd", "docentiSingoliAd", "docentiAtaSingoliAd"))
+    testo = (x.get("desMessaggio") or x.get("desOggetto") or "").strip()
+    return {
+        "pk": x.get("pk"), "titolo": testo.split("\n")[0][:200] or "Messaggio", "testo": testo[:4000],
+        "categoria": x.get("desCategoria") or "", "data": str(x.get("datGiorno") or x.get("datPubblicazione") or "")[:10],
+        "mittente": x.get("desMittente") or "", "n_allegati": x.get("numAllegati") or 0,
+        "pv_richiesta": bool(x.get("docentiPv")), "pv_fatta": bool(x.get("docentiPvConfermata")),
+        "pv_quando": x.get("dataConfermaPv") or "",
+        "ad_richiesta": ad_rich, "ad_fatta": bool(x.get("docentiAdConfermata")),
+        "adesione": x.get("flgAdesione") if x.get("docentiAdConfermata") else "",
+        "ad_quando": x.get("dataConfermaAd") or "", "ad_scadenza": str(x.get("datScadenzaAdesione") or "")[:10],
+        "ad_modificabile": x.get("adesioneModificabile", True) is not False,
+        "scaricati": allegati_didup(utente_id, x["pk"]) if x.get("pk") is not None else [],
+    }
+
+
+@rotta("GET", "/api/didup/bacheca")
+def api_didup_bacheca(c, u, m, corpo, q, req):
+    try:
+        s = sessione_didup(req, u)
+        elenco = argo.bacheca_didup(s)
+    except Errore as e:
+        return {"collegata": False, "motivo": str(e)}
+    except argo.ErroreArgo as e:
+        if "scaduta" in str(e):
+            SESSIONI_DIDUP.pop(req.token, None)
+        return {"collegata": False, "motivo": str(e)}
+    s["ultimo_elenco"] = {x.get("pk"): x for x in elenco if x.get("pk") is not None}
+    msg = [messaggio_didup(x, u["id"]) for x in elenco if x.get("pk") is not None]
+    da_fare = [x for x in msg if (x["pv_richiesta"] and not x["pv_fatta"]) or (x["ad_richiesta"] and not x["ad_fatta"])]
+    altri = sorted([x for x in msg if x not in da_fare], key=lambda x: x["data"], reverse=True)
+    da_fare.sort(key=lambda x: x["data"], reverse=True)
+    return {"collegata": True, "messaggi": da_fare + altri, "da_fare": len(da_fare), "adesioni": ADESIONI}
+
+
+@rotta("POST", r"/api/didup/bacheca/(\d+)/conferma")
+def api_didup_conferma(c, u, m, corpo, q, req):
+    s = sessione_didup(req, u)
+    pk = int(m.group(1))
+    x = (s.get("ultimo_elenco") or {}).get(pk)
+    try:
+        if x is None:
+            x = next((y for y in argo.bacheca_didup(s) if y.get("pk") == pk), None)
+        if x is None:
+            raise Errore("Messaggio non trovato nella bacheca DidUP.", 404)
+        adesione = corpo.get("adesione") or None
+        info = messaggio_didup(x, u["id"])
+        if adesione is not None:
+            if adesione not in ADESIONI:
+                raise Errore("Scegli una risposta di adesione.")
+            if not info["ad_richiesta"]:
+                raise Errore("Questo messaggio non chiede un'adesione.")
+            if info["ad_fatta"] and not info["ad_modificabile"]:
+                raise Errore("L'adesione a questo messaggio non è più modificabile.")
+        elif not info["pv_richiesta"]:
+            raise Errore("Questo messaggio non chiede la presa visione.")
+        file = argo.conferma_didup(s, x, adesione)
+    except argo.ErroreArgo as e:
+        if "scaduta" in str(e):
+            SESSIONI_DIDUP.pop(req.token, None)
+        raise Errore(str(e), 502)
+    d = cartella_didup(u["id"], pk)
+    os.makedirs(d, exist_ok=True)
+    for nome, dati in file:
+        sicuro = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", os.path.basename(nome))[:120] or "allegato"
+        with open(os.path.join(d, sicuro), "wb") as f:
+            f.write(dati)
+    if adesione is None:
+        x["docentiPvConfermata"] = True
+    else:
+        x["docentiAdConfermata"], x["flgAdesione"] = True, adesione
+    return {"ok": True, "messaggio": messaggio_didup(x, u["id"]), "scaricati": len(file)}
+
+
+@rotta("GET", r"/api/didup/allegato/(\d+)/(\d+)")
+def api_didup_allegato(c, u, m, corpo, q, req):
+    el = allegati_didup(u["id"], int(m.group(1)))
+    i = int(m.group(2))
+    if i >= len(el):
+        raise Errore("Allegato non trovato.", 404)
+    percorso = os.path.join(cartella_didup(u["id"], int(m.group(1))), el[i]["nome"])
+    with open(percorso, "rb") as f:
+        dati = f.read()
+    return file_da_scaricare(dati, el[i]["nome"], mimetypes.guess_type(el[i]["nome"])[0] or "application/octet-stream")
 
 
 @rotta("GET", "/api/io")
@@ -1866,7 +1990,7 @@ def crea_demo():
          "1. Approvazione del verbale della seduta precedente\n2. Piano annuale delle attività\n3. Progetti PTOF\n"
          "4. Varie ed eventuali", "docenti", 1, 0, None),
         ("Piano ferie estive del personale ATA",
-         "Il personale ATA è invitato a presentare la richiesta di ferie estive tramite WolfDesk entro la fine "
+         "Il personale ATA è invitato a presentare la richiesta di ferie estive tramite SmartDesk entro la fine "
          "del mese, per permettere la stesura del piano di servizio.", "ata", 1, 0, None),
         ("Orario di ricevimento della segreteria",
          "La segreteria del personale riceve dal lunedì al venerdì dalle 10:00 alle 12:00 e il martedì anche dalle "
@@ -1880,7 +2004,7 @@ def crea_demo():
         if i == 2:
             aid = uuid.uuid4().hex
             pdf = pdf_semplice(["Convocazione del Collegio dei docenti", "", "Ordine del giorno allegato.",
-                                "(documento di prova generato da WolfDesk)"])
+                                "(documento di prova generato da SmartDesk)"])
             with open(os.path.join(DATI, "allegati", aid), "wb") as f:
                 f.write(pdf)
             c.execute("INSERT INTO allegati VALUES (?,?,?,?,?,?,?,?)", (aid, "circolare", cur.lastrowid,
@@ -1908,7 +2032,7 @@ def crea_demo():
                          ora.isoformat()))
         aid = uuid.uuid4().hex
         pdf = pdf_semplice([f"Cedolino {mese_prec.strftime('%m/%Y')} - documento di prova",
-                            f"Dipendente: {un}", "", "Questo file serve solo a provare WolfDesk."])
+                            f"Dipendente: {un}", "", "Questo file serve solo a provare SmartDesk."])
         with open(os.path.join(DATI, "allegati", aid), "wb") as f:
             f.write(pdf)
         c.execute("INSERT INTO allegati VALUES (?,?,?,?,?,?,?,?)", (aid, "documento", cur.lastrowid,
@@ -1923,7 +2047,7 @@ def crea_demo():
 
 def main():
     global DATI
-    p = argparse.ArgumentParser(description="WolfDesk - sportello del personale")
+    p = argparse.ArgumentParser(description="SmartDesk - sportello del personale")
     p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 per accettare i telefoni della rete")
     p.add_argument("--porta", type=int, default=8850)
     p.add_argument("--dati", help="cartella dei dati (database e allegati)")
@@ -1971,7 +2095,7 @@ def main():
         pw = crea_demo()
         if pw:
             with open(os.path.join(DATI, "credenziali-demo.txt"), "w", encoding="utf-8") as f:
-                f.write("Account di prova di WolfDesk (tutti con la stessa password)\n\n"
+                f.write("Account di prova di SmartDesk (tutti con la stessa password)\n\n"
                         "Utenti: dirigente, dsga, segreteria, g.rinaldi, s.conti, e.marino, f.colombo (docenti),\n"
                         "        a.ricci, r.greco, d.fontana (ATA)\n\n"
                         f"Password: {pw}\n")
@@ -1992,7 +2116,7 @@ def main():
     if not a.demo:
         threading.Thread(target=ciclo_bacheca_argo, daemon=True).start()
     srv = ThreadingHTTPServer((a.host, a.porta), Gestore)
-    print(f"WolfDesk in ascolto su http://{'localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host}"
+    print(f"SmartDesk in ascolto su http://{'localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host}"
           f":{a.porta}  (Ctrl+C per fermare)")
     try:
         srv.serve_forever()

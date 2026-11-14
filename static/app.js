@@ -1,5 +1,5 @@
 'use strict';
-/* WolfDesk (Sportello del personale) - interfaccia (JavaScript puro, nessuna libreria) */
+/* SmartDesk (Sportello del personale, by Wolf Team) - interfaccia (JavaScript puro, nessuna libreria) */
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -29,6 +29,9 @@ const P = {
   famiglia: '<circle cx="8" cy="7" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c.5-4 3-6 6-6s5.5 2 6 6M14 20c.3-2.5 1.5-4.5 3-4.5s2.7 2 3 4.5"/>',
   calendario: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   esci: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  lupo: '<path d="M5 3l4 5h6l4-5 1 7 2 3-5 3-5 5-5-5-5-3 2-3z"/>',
+  luna: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/>',
 };
 const ico = (n, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
 const ICO_GRUPPO = { 'Ferie e permessi': 'sole', 'Salute': 'cuore', 'Famiglia': 'famiglia', 'Altro': 'richieste' };
@@ -139,28 +142,29 @@ function chiedi({ titolo, testo = '', nota = false, notaObbligatoria = false, bo
 // ------------------------------------------------------------------ accesso
 async function mostraAccesso() {
   clearInterval(TIMER);
-  document.title = 'WolfDesk – Accesso';
+  document.title = 'SmartDesk – Accesso';
   let info = { scuola: '', argo: false };
   try { info = await (await fetch('/api/accesso-info')).json(); } catch { /* offline */ }
   let modo = 'sportello';
   try { modo = info.argo ? (localStorage.getItem('sp-modo') || 'argo') : 'sportello'; } catch { modo = info.argo ? 'argo' : 'sportello'; }
   $('#app').innerHTML = `
-  <div class="accesso"><form class="card" id="f-acc">
-    <div class="riga" style="margin-bottom:18px"><img src="/icona.svg" alt=""><div><h1 style="margin:0">WolfDesk</h1><div class="muted">Sportello del personale${info.scuola ? ' · ' + esc(info.scuola) : ''}</div></div></div>
-    ${info.argo ? `<div class="schede" style="margin-bottom:16px"><button type="button" data-modo="argo">Credenziali Argo</button><button type="button" data-modo="sportello">Account WolfDesk</button></div>` : ''}
+  <div class="accesso">${bottoneTema('tema-accesso')}<form class="card" id="f-acc">
+    <div class="riga" style="margin-bottom:18px"><img src="/icona.svg" alt=""><div><h1 style="margin:0">SmartDesk</h1><div class="muted">Sportello del personale${info.scuola ? ' · ' + esc(info.scuola) : ''}</div></div></div>
+    ${info.argo ? `<div class="schede" style="margin-bottom:16px"><button type="button" data-modo="argo">Credenziali Argo</button><button type="button" data-modo="sportello">Account SmartDesk</button></div>` : ''}
     <p class="muted piccolo" id="acc-spiega" style="margin-top:0"></p>
     <label class="campo"><span id="acc-utente">Nome utente</span><input type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label class="campo"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
     <div id="acc-errore"></div>
     <button class="btn primario grande" style="width:100%" id="acc-entra">Entra</button>
     <p class="muted piccolo" style="margin:14px 0 0" id="acc-aiuto"></p>
-    <p class="credito">Sviluppata dal Wolf Team dell'Istituto Comprensivo di Almese · © 2026</p>
+    <p class="credito">Sviluppata dal <b>Wolf Team</b> dell'Istituto Comprensivo di Almese · © 2026</p>
   </form></div>`;
+  collegaTema();
   const f = $('#f-acc');
   const imposta = m => {
     modo = m;
     $$('[data-modo]', f).forEach(b => b.classList.toggle('attiva', b.dataset.modo === m));
-    $('#acc-spiega').textContent = m === 'argo' ? 'Usa lo stesso nome utente e la stessa password del portale Argo. WolfDesk li controlla con Argo e non salva la password.' : '';
+    $('#acc-spiega').textContent = m === 'argo' ? 'Usa lo stesso nome utente e la stessa password del portale Argo. SmartDesk li controlla con Argo e non salva la password.' : '';
     $('#acc-utente').textContent = m === 'argo' ? 'Nome utente Argo' : 'Nome utente';
     f.username.placeholder = m === 'argo' ? 'nome.cognome.SC12345' : '';
     $('#acc-aiuto').textContent = m === 'argo' ? 'Password Argo dimenticata? Si recupera dal portale Argo.' : 'Password dimenticata? Chiedi alla segreteria del personale di reimpostarla.';
@@ -206,14 +210,16 @@ function disegnaShell() {
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="lato">
-      <div class="marchio"><img src="/icona.svg" alt=""><div><b>WolfDesk</b><small>${esc(IO.scuola || 'Sportello del personale')}</small></div></div>
+      <div class="marchio"><img src="/icona.svg" alt=""><div><b>SmartDesk</b><small>${esc(IO.scuola || 'Sportello del personale')}</small></div></div>
       ${v.map(([k, n, h]) => `<a class="voce" data-voce="${k}" href="${h}">${ico(k)}<span>${n}</span><span class="bollo-slot" data-b="${k}"></span></a>`).join('')}
-      <div class="sotto"><b style="color:var(--text)">${esc(u.nome)} ${esc(u.cognome)}</b><br>${esc(u.ruolo_nome)} · a.s. ${esc(IO.anno)}</div>
+      <div class="sotto"><b style="color:var(--text)">${esc(u.nome)} ${esc(u.cognome)}</b><br>${esc(u.ruolo_nome)} · a.s. ${esc(IO.anno)}
+        <div class="crediti-lato">${ico('lupo')} by Wolf Team</div></div>
     </aside>
     <div class="principale">
       <header class="barra">
         <img class="marchio-mobile" src="/icona.svg" alt="">
         <div class="titolo" id="titolo"></div>
+        ${bottoneTema()}
         <button class="tondo campana" id="campana" aria-label="Notifiche">${ico('campana')}<span class="bollo-slot" data-b="notifiche"></span></button>
         <a class="avatar" href="#/profilo" title="Profilo">${esc(iniziali(u))}</a>
       </header>
@@ -225,6 +231,7 @@ function disegnaShell() {
     </nav>
   </div>`;
   $('#campana').onclick = apriNotifiche;
+  collegaTema();
   $('#altro').onclick = () => {
     const f = finestra(`<h2>Menu</h2><div class="lista">${v.filter(x => !mobile.includes(x[0])).map(([k, n, h]) =>
       `<a class="elem" href="${h}"><span class="ico">${ico(k)}</span><span class="testo"><b>${n}</b></span></a>`).join('')}
@@ -237,7 +244,7 @@ function disegnaShell() {
 
 function disegnaBadge() {
   $$('.bollo-slot').forEach(s => { s.innerHTML = bollo(BADGE[s.dataset.b]); });
-  document.title = (BADGE.notifiche ? `(${BADGE.notifiche}) ` : '') + 'WolfDesk';
+  document.title = (BADGE.notifiche ? `(${BADGE.notifiche}) ` : '') + 'SmartDesk';
 }
 
 async function aggiornaBadge() {
@@ -609,7 +616,8 @@ async function vistaBacheca(c, m, q) {
     <div class="riga" style="margin-bottom:16px"><h1 style="margin:0">Bacheca</h1><span class="spazio"></span>
       ${IO.staff && IO.impostazioni.argo_codice_scuola ? `<button class="btn" id="agg-argo">Aggiorna da Argo</button>` : ''}
       ${IO.staff ? `<a class="btn primario" href="#/nuova-circolare">${ico('piu')} Nuova circolare</a>` : ''}</div>
-    ${IO.impostazioni.argo_codice_scuola && IO.impostazioni.argo_bacheca === '1' ? `<p class="muted piccolo" style="margin-top:-8px">Comprende le pubblicazioni di «La Segreteria Comunica» di Argo (${esc(IO.impostazioni.argo_codice_scuola)}), aggiornate ogni 30 minuti. Le circolari interne di DidUP non ci sono.</p>` : ''}
+    ${IO.impostazioni.argo_codice_scuola && IO.impostazioni.argo_bacheca === '1' ? `<p class="muted piccolo" style="margin-top:-8px">Comprende le pubblicazioni di «La Segreteria Comunica» di Argo (${esc(IO.impostazioni.argo_codice_scuola)}), aggiornate ogni 30 minuti. Le circolari interne di DidUP sono nel riquadro qui sopra.</p>` : ''}
+    <div id="didup"></div>
     <div class="filtri">
       <input type="search" id="cerca" placeholder="Cerca per titolo, testo o numero…" value="${esc(q.q || '')}" style="max-width:380px">
       ${[['tutte', 'Tutte'], ['da-leggere', 'Da leggere']].map(([k, n]) => `<button class="pillola ${filtro === k ? 'attiva' : ''}" data-f="${k}">${n}</button>`).join('')}
@@ -629,7 +637,96 @@ async function vistaBacheca(c, m, q) {
     e.target.disabled = false;
   });
   $$('[data-f]', c).forEach(b => b.onclick = () => { filtroAtt = b.dataset.f; $$('[data-f]', c).forEach(x => x.classList.toggle('attiva', x === b)); carica(); });
+  caricaDidup($('#didup'));
   await carica();
+}
+
+// ---- circolari DidUP: presa visione e adesione in un tocco (SmartDesk apre davvero l'allegato al posto tuo)
+async function caricaDidup(box, tutte = false) {
+  if (!box) return;
+  box.innerHTML = `<div class="card didup"><div class="riga"><h2 style="margin:0">Circolari DidUP</h2><span class="spazio"></span><span class="muted piccolo">Caricamento…</span></div></div>`;
+  let d;
+  try { d = await api('/api/didup/bacheca'); } catch (err) { d = { collegata: false, motivo: err.message }; }
+  if (!d.collegata) {
+    box.innerHTML = `<div class="card didup spenta"><div class="riga" style="flex-wrap:nowrap"><span class="ico-didup">${ico('bacheca')}</span>
+      <div class="spazio"><b>Circolari DidUP</b><div class="muted piccolo">${esc(d.motivo)}</div></div></div></div>`;
+    return;
+  }
+  const msg = tutte ? d.messaggi : d.messaggi.filter((x, i) => (x.pv_richiesta && !x.pv_fatta) || (x.ad_richiesta && !x.ad_fatta) || i < d.da_fare + 5);
+  const soloPv = d.messaggi.filter(x => x.pv_richiesta && !x.pv_fatta && !x.ad_richiesta);
+  box.innerHTML = `<div class="card didup">
+    <div class="riga" style="margin-bottom:6px"><h2 style="margin:0">Circolari DidUP</h2>
+      ${d.da_fare ? `<span class="chip nonletta">${d.da_fare} da confermare</span>` : '<span class="chip letta">Tutto confermato</span>'}
+      <span class="spazio"></span>
+      ${soloPv.length > 1 ? `<button class="btn primario mini" id="dd-tutte">${ico('ok')} Prendi visione di tutte (${soloPv.length})</button>` : ''}</div>
+    <p class="muted piccolo" style="margin:0 0 12px">Un tocco basta: SmartDesk scarica l'allegato al posto tuo e poi conferma su Argo. I file restano qui, pronti da aprire.</p>
+    <div class="lista">${msg.map(elemDidup).join('') || '<div class="vuoto">Nessun messaggio.</div>'}</div>
+    ${!tutte && msg.length < d.messaggi.length ? `<button class="btn mini" id="dd-altre" style="margin-top:10px">Mostra anche le altre (${d.messaggi.length - msg.length})</button>` : ''}
+  </div>`;
+  $('#dd-altre', box)?.addEventListener('click', () => caricaDidup(box, true));
+  const conferma = async (pk, adesione, bottone) => {
+    const el = bottone.closest('.didup-msg');
+    el.classList.add('occupato');
+    $$('button', el).forEach(b => b.disabled = true);
+    const vecchio = bottone.innerHTML;
+    bottone.innerHTML = adesione ? 'Invio…' : 'Apro e confermo…';
+    try {
+      const r = await api(`/api/didup/bacheca/${pk}/conferma`, { adesione: adesione || null });
+      el.outerHTML = elemDidup(r.messaggio);
+      return r;
+    } catch (err) {
+      toast(err.message, true);
+      el.classList.remove('occupato');
+      $$('button', el).forEach(b => b.disabled = false);
+      bottone.innerHTML = vecchio;
+      throw err;
+    }
+  };
+  box.onclick = async e => {
+    const b = e.target.closest('[data-pv],[data-ad]');
+    if (!b || b.disabled) return;
+    try {
+      const r = await conferma(b.dataset.pv || b.dataset.pk, b.dataset.ad, b);
+      toast(b.dataset.ad ? `Adesione registrata su Argo: ${d.adesioni[b.dataset.ad]}.` : `Presa visione registrata su Argo${r.scaricati ? ' (allegato aperto e salvato)' : ''}.`);
+    } catch { /* già segnalato */ }
+  };
+  $('#dd-tutte', box)?.addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!confirm(`Confermare la presa visione di ${soloPv.length} circolari su Argo? SmartDesk scarica prima ogni allegato.`)) return;
+    e.target.disabled = true;
+    let ok = 0;
+    for (const x of soloPv) {
+      const b = $(`[data-pv="${x.pk}"]`, box);
+      if (!b) continue;
+      try { await conferma(x.pk, null, b); ok++; } catch { break; }
+    }
+    toast(`Presa visione registrata per ${ok} circolari.`);
+    caricaDidup(box, tutte);
+  });
+}
+
+function elemDidup(x) {
+  const pvDaFare = x.pv_richiesta && !x.pv_fatta;
+  const scadAd = x.ad_scadenza && x.ad_scadenza < oggiIso();
+  const bloccaAd = scadAd || (x.ad_fatta && !x.ad_modificabile);
+  return `<div class="didup-msg ${pvDaFare || (x.ad_richiesta && !x.ad_fatta) ? 'da-fare' : ''}">
+    <div class="riga" style="align-items:flex-start;flex-wrap:nowrap">
+      <span class="ico">${ico('bacheca')}</span>
+      <div class="spazio" style="min-width:0">
+        <b class="tit">${esc(x.titolo)}</b>
+        <div class="muted piccolo">${x.data ? fd(x.data) : ''}${x.categoria ? ' · ' + esc(x.categoria) : ''}${x.mittente ? ' · ' + esc(x.mittente) : ''}${x.n_allegati ? ' · 📎 ' + x.n_allegati : ''}</div>
+        ${x.testo && x.testo !== x.titolo ? `<details><summary class="piccolo">Testo</summary><div class="testo-circ piccolo">${esc(x.testo)}</div></details>` : ''}
+        ${x.scaricati.length ? `<div style="margin-top:8px">${x.scaricati.map(a => `<a class="allegato" href="${a.url}" target="_blank" rel="noopener">${ico('scarica')} ${esc(a.nome)}</a>`).join('')}</div>` : ''}
+      </div>
+    </div>
+    <div class="azioni">
+      ${pvDaFare ? `<button class="btn primario" data-pv="${x.pk}">${ico('ok')} Prendo visione</button>`
+        : x.pv_fatta ? `<span class="chip letta">Presa visione${x.pv_quando ? ' · ' + esc(x.pv_quando) : ''}</span>` : ''}
+      ${x.ad_richiesta ? `<div class="adesione">${Object.entries({ A: 'Aderisco', N: 'Non aderisco', X: 'Non ho deciso' }).map(([k, n]) =>
+        `<button class="pillola ${x.adesione === k ? 'attiva' : ''}" data-ad="${k}" data-pk="${x.pk}" ${bloccaAd ? 'disabled' : ''}>${n}</button>`).join('')}
+        ${x.ad_scadenza ? `<span class="muted piccolo">entro ${fd(x.ad_scadenza)}${scadAd ? ' (scaduto)' : ''}</span>` : ''}</div>` : ''}
+    </div>
+  </div>`;
 }
 
 async function vistaCircolare(c, m) {
@@ -710,7 +807,7 @@ async function vistaPresenze(c, m, q) {
   if (IO.staff) utenti = await api('/api/utenti');
   const target = q.utente || (IO.timbrature ? IO.utente.id : utenti.find(u => u.categoria === 'ata' && u.attivo)?.id);
   if (!target) {
-    c.innerHTML = `<h1>Cartellini</h1><div class="card vuoto">Non c'è ancora personale ATA in WolfDesk.<br>I cartellini compaiono quando i collaboratori entrano con Argo o vengono aggiunti in Gestione › Personale.</div>`;
+    c.innerHTML = `<h1>Cartellini</h1><div class="card vuoto">Non c'è ancora personale ATA in SmartDesk.<br>I cartellini compaiono quando i collaboratori entrano con Argo o vengono aggiunti in Gestione › Personale.</div>`;
     return;
   }
   const k = await api(`/api/cartellino?mese=${mese}&utente=${target}`);
@@ -914,7 +1011,7 @@ function schedaDipendente(u) {
       <label class="campo"><span>Ferie residue anno precedente</span><input type="number" name="ferie_ap" min="0" max="40" value="${u.ferie_ap}"></label>
       <label class="campo"><span>Utente Argo</span><input type="text" name="argo_utente" value="${esc(u.argo_utente || '')}" autocapitalize="none" spellcheck="false" placeholder="nome utente del portale Argo"><small>Per entrare con le credenziali Argo</small></label>
     </div>
-    ${nuovo ? `<label class="spunta"><input type="checkbox" name="solo_argo"><span>Entra solo con Argo (nessuna password di WolfDesk)</span></label>` : (u.solo_argo ? '<p class="muted piccolo">Entra solo con Argo. «Reimposta password» gli dà anche una password di WolfDesk.</p>' : '')}
+    ${nuovo ? `<label class="spunta"><input type="checkbox" name="solo_argo"><span>Entra solo con Argo (nessuna password di SmartDesk)</span></label>` : (u.solo_argo ? '<p class="muted piccolo">Entra solo con Argo. «Reimposta password» gli dà anche una password di SmartDesk.</p>' : '')}
     ${nuovo ? '' : `<label class="spunta"><input type="checkbox" name="attivo" ${u.attivo ? 'checked' : ''}><span>Account attivo</span></label>`}
     </form>
     ${nuovo ? '' : `<div class="riga" style="margin-top:6px"><a class="btn mini" href="#/situazione?utente=${u.id}">Situazione</a><a class="btn mini" href="#/presenze?utente=${u.id}">Cartellino</a><a class="btn mini" href="#/gestione/richieste?utente=${u.id}">Richieste</a><button class="btn mini pericolo" id="u-pw">Reimposta password</button></div>`}
@@ -1002,11 +1099,27 @@ async function vistaProfilo(c) {
   };
 }
 
+function temaAttuale() { return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'; }
 function applicaTema(t) {
   try { localStorage.setItem('sp-tema', t); } catch { /* niente */ }
-  if (t === 'auto') document.documentElement.removeAttribute('data-theme');
-  else document.documentElement.setAttribute('data-theme', t);
+  if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  const mc = document.querySelector('meta[name=theme-color]');
+  if (mc) mc.content = t === 'light' ? '#f4f1ff' : '#0b0719';
+  $$('.cambia-tema').forEach(b => { b.innerHTML = ico(t === 'light' ? 'luna' : 'sole'); b.title = t === 'light' ? 'Passa al tema scuro' : 'Passa al tema chiaro'; });
 }
-try { const t = localStorage.getItem('sp-tema'); if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t); } catch { /* niente */ }
+// interruttore chiaro/scuro (barra in alto e pagina di accesso)
+function bottoneTema(cls = '') {
+  const t = temaAttuale();
+  return `<button type="button" class="tondo cambia-tema ${cls}" title="${t === 'light' ? 'Passa al tema scuro' : 'Passa al tema chiaro'}" aria-label="Cambia tema chiaro o scuro">${ico(t === 'light' ? 'luna' : 'sole')}</button>`;
+}
+function collegaTema() {
+  $$('.cambia-tema').forEach(b => b.onclick = () => {
+    document.documentElement.classList.add('tema-in-cambio');
+    applicaTema(temaAttuale() === 'light' ? 'dark' : 'light');
+    setTimeout(() => document.documentElement.classList.remove('tema-in-cambio'), 450);
+  });
+}
+try { if (localStorage.getItem('sp-tema') === 'light') applicaTema('light'); } catch { /* niente */ }
 
 avvia();

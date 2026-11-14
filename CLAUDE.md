@@ -1,8 +1,16 @@
-# Note per Claude: WolfDesk (Sportello Personale)
-
-Nome dell'app dal 14/11: **WolfDesk** – "Sportello del personale" (famiglia Wolf Team, icona = lupo del kit
-`Progetti AI\Didattici\WolfTeam\marchio`). Grafica: tema scuro viola predefinito (sfumature, vetro, font Inter +
-Space Grotesk da Google Fonts), variante "Chiaro lavanda" nel Profilo. Cartella e file restano `sportello-personale`.
+# Note per Claude: SmartDesk (Sportello Personale)
+Nome dell'app (14/11): **SmartDesk** – "Sportello del personale", con "by Wolf Team" come crediti (lato e accesso).
+Icona `static/icona.svg`: lupo del kit Wolf Team con occhiali tondi su sfondo viola->magenta. Tema scuro viola
+predefinito, interruttore sole/luna nella barra in alto e sulla pagina di accesso (localStorage `sp-tema`).
+Cartella e file restano `sportello-personale`.
+- Circolari DidUP (14/11): all'accesso Argo si apre anche la sessione DidUP (`argo.apri_didup`, POST
+  didattica.portaleargo.it/wsxrest/api/rest/login con il gettone del client 963ed..., header cod-prodotto WSX,
+  argo-client-version 4.54.2, x-auth-token = uid, anno-scolastico). Tenuta SOLO in memoria (`SESSIONI_DIDUP`, per
+  token di sessione): al riavvio del server si rientra con Argo. Bacheca: `bachecanuova/listamessaggibachecadocente`
+  {anno}; conferma: prima `loaddatidettagliomessaggiobacheca` + `richiediurlallegato` e download VERO del file
+  (salvato in `dati/didup-allegati/<utente>/<pk>/`), poi `confermapresavisioneadesione` {pk, presaVisione,
+  flgAdesione A/N/X, downloadEffettuato: true}. Mai dichiarare il download senza averlo fatto. Conferme solo su
+  clic dell'utente. Endpoint ricavati da /voti/classic/app.js (V.4.54.2), non ancora provati sul vero DidUP.
 
 App web per le esigenze del personale scolastico, modello Argo Unica (richieste di assenza con verifica
 segreteria -> autorizzazione dirigente/DSGA, bacheca con presa visione/adesione, timbrature e cartellino,

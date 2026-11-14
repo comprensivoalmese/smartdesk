@@ -1,4 +1,4 @@
-/* WolfDesk – tema scuro viola (predefinito) e variante chiara lavanda */
+/* SmartDesk (by Wolf Team) – tema scuro viola (predefinito) e variante chiara lavanda */
 :root {
   --bg: #090615;
   --bg-2: #120c26;
@@ -426,3 +426,35 @@ tr.cliccabile:hover td { background: var(--primary-soft); }
   body { background: #fff; color: #000; }
   .card { background: #fff; box-shadow: none; border-color: #ccc; }
 }
+
+/* ---- interruttore chiaro/scuro e crediti */
+.tema-in-cambio, .tema-in-cambio * { transition: background-color .35s, color .35s, border-color .35s, box-shadow .35s !important; }
+.cambia-tema svg { transition: transform .4s; }
+.cambia-tema:hover svg { transform: rotate(25deg); }
+.tema-accesso { position: absolute; top: 16px; right: 16px; z-index: 2; }
+.crediti-lato { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: .72rem; letter-spacing: .04em; opacity: .75; }
+.crediti-lato svg { width: 14px; height: 14px; color: var(--primary); }
+.credito b { color: var(--primary); font-weight: 600; }
+
+/* ---- circolari DidUP */
+.card.didup { margin-bottom: 22px; border-color: var(--line-forte); background: linear-gradient(160deg, rgba(124, 58, 237, .16), transparent 55%), var(--card); }
+.card.didup.spenta { background: var(--card); border-color: var(--line); padding: 14px 18px; }
+.ico-didup { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; background: var(--grad-tenue); color: var(--primary); border: 1px solid var(--line); }
+.ico-didup svg { width: 20px; height: 20px; }
+.didup-msg {
+  display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 13px 15px; border-radius: 14px; border: 1px solid var(--line); background: var(--card-2); transition: border-color .15s, opacity .2s;
+}
+.didup-msg.da-fare { border-color: var(--line-forte); box-shadow: inset 3px 0 0 #a855f7; }
+.didup-msg.occupato { opacity: .6; }
+.didup-msg .ico { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--grad-tenue); color: var(--primary); border: 1px solid var(--line); }
+.didup-msg .ico svg { width: 19px; height: 19px; }
+.didup-msg > .riga { flex: 1 1 320px; min-width: 0; }
+.didup-msg .tit { display: block; overflow-wrap: anywhere; }
+.didup-msg details summary { cursor: pointer; color: var(--primary); margin-top: 4px; }
+.didup-msg details .testo-circ { margin-top: 6px; max-height: 260px; overflow: auto; }
+.didup-msg .azioni { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.didup-msg .adesione { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.didup-msg .allegato { margin: 0 6px 0 0; padding: 5px 10px; font-size: .84rem; }
+@media (max-width: 860px) { .didup-msg .azioni { justify-content: flex-start; width: 100%; } .didup-msg .azioni .btn { flex: 1; } }
+.pillola[disabled] { opacity: .45; cursor: not-allowed; box-shadow: none; }

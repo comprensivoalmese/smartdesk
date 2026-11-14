@@ -101,6 +101,9 @@ def avvia_finto_argo():
                     return self.manda(302, loc="/login?challenge=abc")
                 ok = q.get("client_id") == [argo.CLIENT_ID] and q.get("code_challenge_method") == ["S256"]
                 return self.manda(302, loc="/login?challenge=abc" if ok else "/errore")
+            if u.path.startswith("/firmato/"):
+                srv.scaricati.add(int(u.path.rsplit("/", 1)[1]))
+                return self.manda(200, "%PDF-1.4 circolare di prova", tipo="application/pdf")
             if u.path == "/login":
                 return self.manda(200, self.modulo())
             if u.path == "/consenso-ok":
@@ -109,6 +112,47 @@ def avvia_finto_argo():
                 return self.manda(302, loc=argo.RITORNO + "&code=COD-" + un,
                                   biscotto=("sso=" + un) if q.get("r") == ["true"] else None)
             self.manda(404)
+
+        def didup(self, grezzo):
+            """Imita la bacheca DidUP: elenco, dettaglio, link firmato dell'allegato, conferma."""
+            tok = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
+            try:
+                un = json.loads(base64.urlsafe_b64decode(tok.split(".")[1] + "==")).get("u", "")
+            except (IndexError, ValueError):
+                return None
+            servizio = self.path.removeprefix("/wsxrest/api/rest/")
+            if self.headers.get("cod-prodotto") != "WSX":
+                return None
+            if servizio == "login":
+                return {"success": True, "uid": "didup-" + un, "annoScolastico": a0, "user": un}
+            if self.headers.get("x-auth-token") != "didup-" + un or self.headers.get("anno-scolastico") != str(a0):
+                return None
+            corpo = json.loads(grezzo or "{}")
+            stato = srv.conferme.setdefault(un, {})
+            if servizio == "bachecanuova/listamessaggibachecadocente":
+                if un != "giulia.r" or corpo.get("anno") != a0:
+                    return {"success": True, "data": {"listaMessaggi": []}}
+                return {"success": True, "data": {"listaMessaggi": [
+                    {"pk": 11, "desMessaggio": "Circolare 48 - Collegio docenti", "desCategoria": "Circolari",
+                     "datGiorno": f"{a0}-11-10", "numAllegati": 1, "docentiPv": True,
+                     "docentiPvConfermata": 11 in stato, "flgAdesione": None},
+                    {"pk": 12, "desMessaggio": "Sciopero del 20 novembre", "datGiorno": f"{a0}-11-12", "numAllegati": 0,
+                     "docentiPv": False, "docentiAd": True, "datScadenzaAdesione": f"{a0 + 1}-08-30",
+                     "docentiAdConfermata": 12 in stato, "flgAdesione": stato.get(12, (None,))[0],
+                     "adesioneModificabile": True},
+                    {"pk": 13, "desMessaggio": "Vecchia circolare", "datGiorno": f"{a0}-09-10", "numAllegati": 0,
+                     "docentiPv": True, "docentiPvConfermata": True, "dataConfermaPv": "11/09/2026"}]}}
+            if servizio == "bachecanuova/loaddatidettagliomessaggiobacheca":
+                return {"success": True, "data": {"listaAllegati": [{"pk": 900 + corpo["pk"], "desFile": "circolare 48.pdf"}]
+                                                  if corpo.get("pk") == 11 else []}}
+            if servizio == "bachecanuova/richiediurlallegato":
+                return {"success": True, "data": {"url": f"{base}/firmato/{corpo['pk']}?firma=abc"}}
+            if servizio == "bachecanuova/confermapresavisioneadesione":
+                if corpo.get("pk") == 11 and 911 not in srv.scaricati:
+                    return {"success": False, "msg": "Scaricare prima l'allegato"}
+                stato[corpo["pk"]] = (corpo.get("flgAdesione"), corpo.get("presaVisione"), corpo.get("downloadEffettuato"))
+                return {"success": True, "data": {"docentiAdConfermata": True}}
+            return None
 
         def personale(self, grezzo):
             """Imita il programma Personale: login e ricerche (solo per giulia.r ci sono assenze)."""
@@ -141,6 +185,9 @@ def avvia_finto_argo():
 
         def do_POST(self):
             grezzo = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+            if self.path.startswith("/wsxrest/api/rest/"):
+                r = self.didup(grezzo)
+                return self.manda(200, json.dumps(r), tipo="application/json") if r is not None else self.manda(401)
             if self.path.startswith("/personale/rest/"):
                 r = self.personale(grezzo)
                 return self.manda(200, json.dumps(r), tipo="application/json") if r is not None else self.manda(401)
@@ -165,7 +212,7 @@ def avvia_finto_argo():
                     return self.manda(200, json.dumps({"access_token": "PTOK-" + v["code"][5:]}), tipo="application/json")
                 un = v["code"].removeprefix("COD-")
                 d = {"sub": "id-" + un, "preferred_username": un} | persone[un]
-                return self.manda(200, json.dumps({"access_token": jwt({"scope": "argo"}), "id_token": jwt(d)}),
+                return self.manda(200, json.dumps({"access_token": jwt({"scope": "argo", "u": un}), "id_token": jwt(d)}),
                                   tipo="application/json")
             self.manda(404)
 
@@ -177,6 +224,8 @@ def avvia_finto_argo():
     argo.RITORNO = base + "/voti/oidc-callback.html?classic"
     argo.PERSONALE_RITORNO = base + "/argopersonale/oidc-callback.html"
     argo.PERSONALE_API = base + "/personale/rest/"
+    argo.DIDUP_API = base + "/wsxrest/api/rest/"
+    srv.scaricati, srv.conferme = set(), {}
     return srv
 
 
@@ -389,6 +438,27 @@ def main():
         dopo = server.utilizzo(c0, uid_g, "motivi_personali", server.inizio_anno(), server.fine_anno(server.oggi()))
         c0.execute("DELETE FROM richieste WHERE creata='x'")
     controlla(prima == dopo, "una richiesta dello Sportello già registrata in segreteria non si conta due volte")
+    s, bd = g.chiama("/api/didup/bacheca")
+    controlla(s == 200 and bd.get("collegata") and bd.get("da_fare") == 2,
+              f"bacheca DidUP collegata all'accesso Argo: 2 da confermare ({bd.get('motivo') or bd.get('da_fare')})")
+    s, e = g.chiama("/api/didup/bacheca/12/conferma", {"adesione": "Z"})
+    controlla(s == 400, "adesione con risposta non valida: rifiutata")
+    s, e = g.chiama("/api/didup/bacheca/12/conferma", {})
+    controlla(s == 400 and "presa visione" in e["errore"], "presa visione su un messaggio che chiede solo l'adesione: rifiutata")
+    s, r = g.chiama("/api/didup/bacheca/11/conferma", {})
+    controlla(s == 200 and r["messaggio"]["pv_fatta"] and r["scaricati"] == 1 and 911 in finto.scaricati,
+              "presa visione: l'allegato viene scaricato davvero e poi si conferma")
+    controlla(finto.conferme["giulia.r"][11] == (None, True, True), "a DidUP arriva presa visione con download effettuato")
+    s, pdf = g.chiama("/api/didup/allegato/11/0")
+    controlla(s == 200 and pdf.startswith(b"%PDF"), "l'allegato scaricato si apre da SmartDesk")
+    s, r = g.chiama("/api/didup/bacheca/12/conferma", {"adesione": "A"})
+    controlla(s == 200 and r["messaggio"]["adesione"] == "A" and finto.conferme["giulia.r"][12][0] == "A",
+              "adesione «Aderisco» registrata")
+    s, bd = g.chiama("/api/didup/bacheca")
+    controlla(bd.get("da_fare") == 0, "dopo le conferme non resta niente da fare")
+    s, e = seg.chiama("/api/didup/bacheca/11/conferma", {})
+    controlla(s == 409 and "credenziali Argo" in e["errore"], "senza accesso Argo non si conferma su DidUP")
+    controlla(seg.chiama("/api/didup/bacheca")[1].get("collegata") is False, "senza accesso Argo la bacheca DidUP non è collegata")
     controlla(not any(x in open(os.path.join(tmp, "argo-personale.json"), encoding="utf-8").read()
                       for x in ("giusta", "Rinaldi", "MOTPERS")), "il file di diagnosi delle assenze ha solo i numeri")
     s, e = Client(base).chiama("/api/accesso", {"username": "nuovo.doc", "password": "giusta", "modo": "argo"})
@@ -413,6 +483,7 @@ def main():
               f"nome.cognome.CODICE: account creato con nome e cognome dal nome utente ({io.get('nome')} {io.get('cognome')})")
     s, e = Client(base).chiama("/api/accesso", {"username": "tullo.ostilio.SC999990", "password": "giusta", "modo": "argo"})
     controlla(s == 403, "codice scuola nel nome utente diverso (SC999990): rifiutato")
+    controlla(am.chiama("/api/didup/allegato/11/0")[0] == 404, "gli allegati scaricati sono visibili solo a chi li ha aperti")
     s, e = Client(base).chiama("/api/accesso", {"username": "altra.scuola", "password": "giusta", "modo": "argo"})
     controlla(s == 403 and "questa scuola" in e["errore"], "persona di un'altra scuola: rifiutata")
     s, e = Client(base).chiama("/api/accesso", {"username": "con.otp", "password": "giusta", "modo": "argo"})

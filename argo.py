@@ -75,7 +75,7 @@ def _segui(op, url, dati=None, ritorno=None):
 def _campi_modulo(html, id_modulo):
     modulo = re.search(rf'<form\b[^>]*id="{id_modulo}".*?</form>', html, re.S)
     if not modulo:
-        raise ErroreArgo("La pagina di accesso di Argo è cambiata: avvisa l'amministratore di WolfDesk.")
+        raise ErroreArgo("La pagina di accesso di Argo è cambiata: avvisa l'amministratore di SmartDesk.")
     campi = {}
     for campo in re.findall(r"<input\b[^>]*>", modulo.group(0)):
         nome = re.search(r'name="([^"]*)"', campo)
@@ -87,10 +87,10 @@ def _campi_modulo(html, id_modulo):
 
 def _motivo(html):
     if 'id="otpForm"' in html:
-        return ("Il tuo account Argo chiede il secondo codice (OTP): WolfDesk non lo gestisce ancora. "
-                "Entra con l'account di WolfDesk.")
+        return ("Il tuo account Argo chiede il secondo codice (OTP): SmartDesk non lo gestisce ancora. "
+                "Entra con l'account di SmartDesk.")
     if 'id="selectForm"' in html:
-        return "Argo chiede di scegliere tra più profili: WolfDesk non lo gestisce ancora."
+        return "Argo chiede di scegliere tra più profili: SmartDesk non lo gestisce ancora."
     if 'id="consentForm"' in html:
         return "Argo chiede di accettare un consenso: entra una volta su portaleargo.it e accettalo."
     if 'id="loginForm"' in html:
@@ -166,15 +166,20 @@ def accedi(utente, password, assenze=False):
             dati = {"errore": str(e)}
         except Exception as e:  # la lettura delle assenze non deve mai impedire l'accesso
             dati = {"errore": f"errore imprevisto ({type(e).__name__})"}
+        try:  # sessione della bacheca DidUP, tenuta solo in memoria per le prese visione
+            dati["didup"] = apri_didup(token["access_token"])
+        except ErroreArgo as e:
+            dati["didup_errore"] = str(e)
+        except Exception as e:
+            dati["didup_errore"] = f"errore imprevisto ({type(e).__name__})"
         return claims, dati
     return claims
 
 
 # ---------------------------------------------------------------- programma Personale (sola lettura)
-def _json(url, corpo=None, intestazioni=None):
-    """POST JSON a un servizio del programma Personale."""
-    h = {"User-Agent": AGENTE, "Accept": "application/json", "Origin": PORTALE,
-         "Referer": PORTALE + "/argopersonale/"}
+def _json(url, corpo=None, intestazioni=None, chi="il programma Personale", referer="/argopersonale/"):
+    """POST JSON a un servizio Argo (programma Personale o DidUP)."""
+    h = {"User-Agent": AGENTE, "Accept": "application/json", "Origin": PORTALE, "Referer": PORTALE + referer}
     if corpo is not None:
         h["Content-Type"] = "application/json"
     h.update(intestazioni or {})
@@ -185,11 +190,81 @@ def _json(url, corpo=None, intestazioni=None):
         with urllib.request.urlopen(req, timeout=25) as r:
             return json.loads(r.read().decode("utf-8", "replace") or "{}")
     except urllib.error.HTTPError as e:
-        raise ErroreArgo(f"il programma Personale ha risposto {e.code} a «{servizio}»")
+        if e.code == 401:
+            raise ErroreArgo(f"{chi}: sessione scaduta, rientra con le credenziali Argo")
+        raise ErroreArgo(f"{chi} ha risposto {e.code} a «{servizio}»")
     except (urllib.error.URLError, TimeoutError, OSError):
-        raise ErroreArgo("il programma Personale non è raggiungibile")
+        raise ErroreArgo(f"{chi} non è raggiungibile")
     except ValueError:
         raise ErroreArgo(f"risposta non leggibile da «{servizio}»")
+
+
+# ---------------------------------------------------------------- bacheca DidUP (prese visione e adesioni)
+DIDUP_API = "https://didattica.portaleargo.it/wsxrest/api/rest/"
+DIDUP_VERSIONE, DIDUP_SMART, DIDUP_BUILD = "4.54.2", "2.5.1", "(build:20251209)"
+
+
+def _didup_h(token, uid=None, anno=None):
+    h = {"Authorization": "Bearer " + token, "argo-client-version": DIDUP_VERSIONE, "argo-smart-version": DIDUP_SMART,
+         "cod-prodotto": "WSX", "x-toolkit": "classic", "x-build": DIDUP_BUILD}
+    if uid:
+        h["x-auth-token"] = uid
+    if anno is not None:
+        h["anno-scolastico"] = str(anno)
+    return h
+
+
+def apri_didup(token):
+    """Apre la sessione applicativa DidUP con il gettone dell'accesso. Restituisce i dati da tenere in memoria."""
+    r = _json(DIDUP_API + "login", intestazioni=_didup_h(token), chi="DidUP", referer="/voti/")
+    if not r.get("success", True) or not r.get("uid"):
+        raise ErroreArgo("DidUP non ha aperto la sessione" + (f" ({r.get('msg')})" if r.get("msg") else ""))
+    anno = r.get("annoScolastico")
+    if isinstance(anno, dict):
+        anno = anno.get("numAnno") or anno.get("anno")
+    scade = _jwt(token).get("exp")
+    return {"token": token, "uid": r["uid"], "anno": anno, "scade": scade or 0}
+
+
+def _didup(s, servizio, corpo):
+    r = _json(DIDUP_API + servizio, corpo, _didup_h(s["token"], s["uid"], s["anno"]), chi="DidUP", referer="/voti/")
+    if r.get("success") is False:
+        raise ErroreArgo("DidUP: " + (r.get("msg") or f"operazione «{servizio}» non riuscita"))
+    return r.get("data", r)
+
+
+def bacheca_didup(s):
+    """Messaggi della bacheca DidUP visibili al dipendente, con lo stato di presa visione e adesione."""
+    return _didup(s, "bachecanuova/listamessaggibachecadocente", {"anno": s["anno"]}).get("listaMessaggi") or []
+
+
+def scarica_allegati_didup(s, pk):
+    """Apre davvero gli allegati del messaggio (come il pulsante di DidUP): chiede il link firmato e scarica il file.
+    Restituisce [(nome, contenuto)]."""
+    dettaglio = _didup(s, "bachecanuova/loaddatidettagliomessaggiobacheca", {"pk": pk})
+    file = []
+    for al in dettaglio.get("listaAllegati") or []:
+        nome = al.get("desFile") or "allegato"
+        url = _didup(s, "bachecanuova/richiediurlallegato", {"pk": al.get("pk"), "nomeFile": nome}).get("url")
+        if not url:
+            raise ErroreArgo(f"DidUP non ha dato il link dell'allegato «{nome}»")
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": AGENTE}), timeout=60) as r:
+                file.append((nome, r.read(30 * 1024 * 1024)))
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise ErroreArgo(f"download dell'allegato «{nome}» non riuscito")
+    return file
+
+
+def conferma_didup(s, messaggio, adesione=None):
+    """Presa visione (adesione=None) o adesione ('A' aderisco, 'N' non aderisco, 'X' non ho deciso).
+    Prima scarica davvero gli allegati, così DidUP registra un'apertura reale. Restituisce gli allegati scaricati."""
+    file = scarica_allegati_didup(s, messaggio["pk"]) if (messaggio.get("numAllegati") or 0) > 0 else []
+    _didup(s, "bachecanuova/confermapresavisioneadesione", {
+        "pk": messaggio["pk"], "presaVisione": adesione is None,
+        "flgAdesione": adesione if adesione is not None else messaggio.get("flgAdesione"),
+        "downloadEffettuato": True})
+    return file
 
 
 def leggi_personale(op, utente, password):
