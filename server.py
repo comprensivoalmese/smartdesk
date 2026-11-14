@@ -448,12 +448,16 @@ def salva_assenze_argo(c, utente_id, dati):
     c.execute("DELETE FROM assenze_argo WHERE utente_id=?", (utente_id,))
 
     def rif_di(a):
-        """La richiesta Argo che ha generato l'assenza (stesse date), per poterla annullare come in Unica."""
-        for r in dati.get("richieste", []):
-            if (r.get("rif") and r.get("stato") not in ARGO_CHIUSE and str(r.get("inizio"))[:10] == str(a["inizio"])[:10]
-                    and str(r.get("fine") or r["inizio"])[:10] == str(a.get("fine") or a["inizio"])[:10]):
-                return json.dumps(r["rif"] | {"stato": r.get("stato")})
-        return ""
+        """La richiesta Argo che ha generato l'assenza, per poterla annullare come in Unica: prima quella con le
+        stesse date, poi una dello stesso tipo che si sovrappone al periodo dell'assenza."""
+        ini, fin = str(a["inizio"])[:10], str(a.get("fine") or a["inizio"])[:10]
+        valide = [r for r in dati.get("richieste", []) if r.get("rif") and r.get("stato") not in ARGO_CHIUSE]
+        uguali = [r for r in valide if str(r.get("inizio"))[:10] == ini and str(r.get("fine") or r["inizio"])[:10] == fin]
+        sovrapposte = [r for r in valide if str(r.get("inizio"))[:10] <= fin and str(r.get("fine") or r["inizio"])[:10] >= ini
+                       and ((r.get("codice") and r.get("codice") == a.get("codice"))
+                            or (r.get("particolarita") and r.get("particolarita") == a.get("particolarita")))]
+        r = (uguali or sovrapposte or [None])[0]
+        return json.dumps(r["rif"] | {"stato": r.get("stato")}) if r else ""
 
     for a in dati.get("assenze", []):
         if not a.get("inizio"):
@@ -637,6 +641,9 @@ def azioni_possibili(u, r, richiedente):
     s = r["stato"]
     mia = r["utente_id"] == u["id"]
     az = []
+    if '"origine": "segreteria"' in (r["campi"] or ""):
+        # assenza del programma della segreteria: l'annullamento si manda ad Argo (come Unica), non si gestisce qui
+        return az
     if mia and s in ATTIVE:
         az.append("annulla")
     if mia and s == "da_integrare":
@@ -1001,7 +1008,11 @@ def api_accesso(c, u, m, corpo, q, req):
             with open(os.path.join(DATI, "argo-personale.json"), "w", encoding="utf-8") as f:
                 json.dump({"quando": adesso().isoformat(), "errore": personale.get("errore", ""),
                            "assenze": len(personale.get("assenze", [])),
-                           "richieste": len(personale.get("richieste", []))}, f, indent=1)
+                           "richieste": len(personale.get("richieste", [])),
+                           "periodi_richieste": [[str(r.get("inizio"))[:10], str(r.get("fine"))[:10], r.get("stato"),
+                                                  bool(r.get("rif"))] for r in personale.get("richieste", [])],
+                           "periodi_assenze": [[str(x.get("inizio"))[:10], str(x.get("fine"))[:10]]
+                                               for x in personale.get("assenze", [])]}, f, indent=1)
         except OSError:
             pass
         return nuova_sessione(c, user, personale.get("didup"), personale.get("didup_errore", ""),

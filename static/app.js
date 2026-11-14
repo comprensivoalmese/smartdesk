@@ -425,9 +425,9 @@ function elemAssenzaSegreteria(x) {
   const q = `${num(x.quantita)} ${x.unita === 'ore' ? 'ore' : x.quantita === 1 ? 'giorno' : 'giorni'}`;
   const r = x.richiesta;
   const bottone = testo => `<button class="btn mini pericolo" data-annulla-seg="${x.id}" data-cosa="${esc((x.descrizione || 'Assenza') + ' del ' + fd(x.inizio))}">${testo}</button>`;
-  const destra = r && r.stato === 'annullamento' && r.inviata ? `<a class="chip annullamento" href="#/richiesta/${r.id}">Annullamento inviato</a>`
-    : r && r.stato === 'annullata' ? `<a class="chip letta" href="#/richiesta/${r.id}">Annullata</a>`
-    : x.annullabile ? bottone(r && r.stato === 'annullamento' ? 'Invia l\'annullamento' : 'Chiedi l\'annullamento')
+  const inviata = r && r.inviata && ['annullamento', 'annullata'].includes(r.stato);
+  const destra = inviata ? `<a class="chip annullamento" href="#/richiesta/${r.id}">Annullamento inviato</a>`
+    : x.annullabile ? bottone(r ? 'Invia l\'annullamento ad Argo' : 'Chiedi l\'annullamento')
     : x.stato === 'registrata' ? '<span class="chip" title="Inserita dalla segreteria senza una tua richiesta: chiedi alla segreteria">Inserita dalla segreteria</span>'
     : '<span class="chip">In attesa</span>';
   return `<div class="elem"><span class="ico">${ico('richieste')}</span><span class="testo"><b>${esc(x.descrizione || 'Assenza')}</b>
