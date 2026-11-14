@@ -757,13 +757,16 @@ async function caricaDidup(box, tutte = false) {
     e.stopPropagation();
     if (!confirm(`Confermare la presa visione di ${soloPv.length} circolari su Argo? SmartDesk scarica prima ogni allegato.`)) return;
     e.target.disabled = true;
-    let ok = 0;
+    let ok = 0, ko = 0;
     for (const x of soloPv) {
       const b = $(`[data-pv="${x.pk}"]`, box);
       if (!b) continue;
-      try { await conferma(x.pk, null, b); ok++; } catch { break; }
+      try { await conferma(x.pk, null, b); ok++; } catch (err) {
+        ko++;
+        if (/sessione|credenziali/i.test(err.message)) break;  // senza sessione DidUP è inutile continuare
+      }
     }
-    toast(`Presa visione registrata per ${ok} circolari.`);
+    toast(`Presa visione registrata per ${ok} circolari${ko ? `; ${ko} non riuscite (riprova da sole)` : ''}.`, ko > 0);
     caricaDidup(box, tutte);
   });
 }

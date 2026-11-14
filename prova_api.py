@@ -143,7 +143,7 @@ def avvia_finto_argo():
                     {"pk": 13, "desMessaggio": "Vecchia circolare", "datGiorno": f"{a0}-09-10", "numAllegati": 0,
                      "docentiPv": True, "docentiPvConfermata": True, "dataConfermaPv": "11/09/2026"}]}}
             if servizio == "bachecanuova/loaddatidettagliomessaggiobacheca":
-                return {"success": True, "data": {"listaAllegati": [{"pk": 900 + corpo["pk"], "desFile": "circolare 48.pdf"}]
+                return {"success": True, "data": {"listaAllegati": [{"pk": 900 + corpo["pk"], "desFile": "Circolare n 074 Permessi studio anno 2026- Riapertura termini TFA Sostegno -ottobre_dicembre 2026 con un nome davvero molto lungo.docx (1).pdf"}]
                                                   if corpo.get("pk") == 11 else []}}
             if servizio == "bachecanuova/richiediurlallegato":
                 return {"success": True, "data": {"url": f"{base}/firmato/{corpo['pk']}?firma=abc"}}

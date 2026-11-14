@@ -1034,7 +1034,16 @@ def chiave_didup(pk):
 
 
 def cartella_didup(utente_id, pk):
-    return os.path.join(DATI, "didup-allegati", str(int(utente_id)), chiave_didup(pk)[:120])
+    # cartella corta: con il codice DidUP intero (~190 caratteri) Windows supera i 260 caratteri di percorso
+    breve = hashlib.sha1(chiave_didup(pk).encode()).hexdigest()[:16]
+    return os.path.join(DATI, "didup-allegati", str(int(utente_id)), breve)
+
+
+def nome_file_breve(nome, massimo=90):
+    nome = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", os.path.basename(nome)).strip(" .") or "allegato"
+    base, est = os.path.splitext(nome)
+    est = est[:10]
+    return (base[:max(1, massimo - len(est))].rstrip(" .") or "allegato") + est
 
 
 def allegati_didup(utente_id, pk):
@@ -1115,12 +1124,15 @@ def api_didup_conferma(c, u, m, corpo, q, req):
         if "scaduta" in str(e):
             SESSIONI_DIDUP.pop(req.token, None)
         raise Errore(str(e), 502)
-    d = cartella_didup(u["id"], pk)
-    os.makedirs(d, exist_ok=True)
-    for nome, dati in file:
-        sicuro = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", os.path.basename(nome))[:120] or "allegato"
-        with open(os.path.join(d, sicuro), "wb") as f:
-            f.write(dati)
+    # la conferma su DidUP è già fatta: se la copia locale non si salva non è un errore per l'utente
+    try:
+        d = cartella_didup(u["id"], pk)
+        os.makedirs(d, exist_ok=True)
+        for nome, dati in file:
+            with open(os.path.join(d, nome_file_breve(nome)), "wb") as f:
+                f.write(dati)
+    except OSError as e:
+        print("Copia locale dell'allegato DidUP non salvata:", e, file=sys.stderr)
     if adesione is None:
         x["docentiPvConfermata"] = True
     else:
