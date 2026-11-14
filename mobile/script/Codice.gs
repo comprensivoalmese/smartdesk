@@ -327,7 +327,7 @@ function leggiPersonale(s) {
   var rif = {}, richieste = [];
   (ric.data || []).forEach(function (r) {
     var orar = r.desOrariaGiorn === 'O';
-    if (r.uid) rif[r.uid] = { uid: r.uid, desNote: r.desNote, prgReferente: r.prgReferente, uidAssenzaDef: r.uidAssenzaDef, stato: r.codStato };
+    if (r.uid) rif[r.uid] = { uid: r.uid, desNote: r.desNote, uidAssenzaDef: r.uidAssenzaDef, stato: r.codStato };
     richieste.push({ id: r.uid || '', inizio: giorno(r.datInizio), fine: giorno(r.datFine || r.datInizio), stato: r.codStato || '',
                      stato_nome: NOMI_STATO[r.codStato] || r.codStato || '', tipo: tipoDa(r.codParticolarita, r.desDescrizione),
                      descrizione: r.desDescrizione || '', oraria: orar, ora_dal: String(r.datPermOraDal || '').slice(-8, -3),
@@ -361,7 +361,7 @@ function azioneAnnulla(c) {
   if (motivo.length > 250) throw new ErroreArgo('Il motivo può avere al massimo 250 caratteri.');
   var allegati = (c.allegati || []).slice(0, 5);
   var esito = chiama(PERSONALE_API + 'richiestascodip/annulla/fwd',
-                     { uid: r.uid, desNote: r.desNote, prgReferente: r.prgReferente, uidAssenzaDef: r.uidAssenzaDef, desNoteAnnullamento: motivo },
+                     { uid: r.uid, desNote: r.desNote, uidAssenzaDef: r.uidAssenzaDef, desNoteAnnullamento: motivo },
                      hPersonale(s.personale), 'put');
   if (esito.success === false) throw new ErroreArgo("Il programma Personale non ha accettato l'annullamento" + (esito.msg ? ': ' + esito.msg : ''));
   var nonCaricati = [];

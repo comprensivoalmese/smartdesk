@@ -338,7 +338,7 @@ def leggi_personale(op, utente, password):
             "oraria": r.get("desOrariaGiorn") == "O",
             "ora_dal": r.get("datPermOraDal") or "", "ora_al": r.get("datPermOraAl") or "",
             # i dati che Unica rimanda indietro per annullare la richiesta
-            "rif": {"uid": r.get("uid"), "desNote": r.get("desNote"), "prgReferente": r.get("prgReferente"),
+            "rif": {"uid": r.get("uid"), "desNote": r.get("desNote"),
                     "uidAssenzaDef": r.get("uidAssenzaDef")} if r.get("uid") else None})
     return out
 
@@ -351,7 +351,7 @@ def _personale_h(s):
 def annulla_richiesta_personale(s, rif, motivo):
     """Chiede l'annullamento di una richiesta di assenza già inoltrata o formalizzata, come il pulsante
     «Annulla» di Unica / Argo Personale (PUT richiestascodip/annulla/fwd con il motivo, max 250 caratteri)."""
-    corpo = {"uid": rif["uid"], "desNote": rif.get("desNote"), "prgReferente": rif.get("prgReferente"),
+    corpo = {"uid": rif["uid"], "desNote": rif.get("desNote"),
              "uidAssenzaDef": rif.get("uidAssenzaDef"), "desNoteAnnullamento": motivo[:250]}
     r = _json(PERSONALE_API + "richiestascodip/annulla/fwd", corpo, _personale_h(s), metodo="PUT")
     if r.get("success") is False:
