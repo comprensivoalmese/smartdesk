@@ -1,4 +1,8 @@
-# Note per Claude: Sportello Personale
+# Note per Claude: WolfDesk (Sportello Personale)
+
+Nome dell'app dal 14/11: **WolfDesk** – "Sportello del personale" (famiglia Wolf Team, icona = lupo del kit
+`Progetti AI\Didattici\WolfTeam\marchio`). Grafica: tema scuro viola predefinito (sfumature, vetro, font Inter +
+Space Grotesk da Google Fonts), variante "Chiaro lavanda" nel Profilo. Cartella e file restano `sportello-personale`.
 
 App web per le esigenze del personale scolastico, modello Argo Unica (richieste di assenza con verifica
 segreteria -> autorizzazione dirigente/DSGA, bacheca con presa visione/adesione, timbrature e cartellino,

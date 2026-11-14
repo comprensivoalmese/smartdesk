@@ -1,5 +1,5 @@
 'use strict';
-/* Sportello Personale - interfaccia (JavaScript puro, nessuna libreria) */
+/* WolfDesk (Sportello del personale) - interfaccia (JavaScript puro, nessuna libreria) */
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -139,27 +139,28 @@ function chiedi({ titolo, testo = '', nota = false, notaObbligatoria = false, bo
 // ------------------------------------------------------------------ accesso
 async function mostraAccesso() {
   clearInterval(TIMER);
-  document.title = 'Sportello Personale – Accesso';
+  document.title = 'WolfDesk – Accesso';
   let info = { scuola: '', argo: false };
   try { info = await (await fetch('/api/accesso-info')).json(); } catch { /* offline */ }
   let modo = 'sportello';
   try { modo = info.argo ? (localStorage.getItem('sp-modo') || 'argo') : 'sportello'; } catch { modo = info.argo ? 'argo' : 'sportello'; }
   $('#app').innerHTML = `
   <div class="accesso"><form class="card" id="f-acc">
-    <div class="riga" style="margin-bottom:18px"><img src="/icona.svg" alt=""><div><h1 style="margin:0">Sportello Personale</h1><div class="muted">${esc(info.scuola || 'Richieste, bacheca e presenze')}</div></div></div>
-    ${info.argo ? `<div class="schede" style="margin-bottom:16px"><button type="button" data-modo="argo">Credenziali Argo</button><button type="button" data-modo="sportello">Account Sportello</button></div>` : ''}
+    <div class="riga" style="margin-bottom:18px"><img src="/icona.svg" alt=""><div><h1 style="margin:0">WolfDesk</h1><div class="muted">Sportello del personale${info.scuola ? ' · ' + esc(info.scuola) : ''}</div></div></div>
+    ${info.argo ? `<div class="schede" style="margin-bottom:16px"><button type="button" data-modo="argo">Credenziali Argo</button><button type="button" data-modo="sportello">Account WolfDesk</button></div>` : ''}
     <p class="muted piccolo" id="acc-spiega" style="margin-top:0"></p>
     <label class="campo"><span id="acc-utente">Nome utente</span><input type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label class="campo"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
     <div id="acc-errore"></div>
     <button class="btn primario grande" style="width:100%" id="acc-entra">Entra</button>
     <p class="muted piccolo" style="margin:14px 0 0" id="acc-aiuto"></p>
+    <p class="credito">Sviluppata dal Wolf Team dell'Istituto Comprensivo di Almese · © 2026</p>
   </form></div>`;
   const f = $('#f-acc');
   const imposta = m => {
     modo = m;
     $$('[data-modo]', f).forEach(b => b.classList.toggle('attiva', b.dataset.modo === m));
-    $('#acc-spiega').textContent = m === 'argo' ? 'Usa lo stesso nome utente e la stessa password del portale Argo. Lo Sportello li controlla con Argo e non salva la password.' : '';
+    $('#acc-spiega').textContent = m === 'argo' ? 'Usa lo stesso nome utente e la stessa password del portale Argo. WolfDesk li controlla con Argo e non salva la password.' : '';
     $('#acc-utente').textContent = m === 'argo' ? 'Nome utente Argo' : 'Nome utente';
     f.username.placeholder = m === 'argo' ? 'nome.cognome.SC12345' : '';
     $('#acc-aiuto').textContent = m === 'argo' ? 'Password Argo dimenticata? Si recupera dal portale Argo.' : 'Password dimenticata? Chiedi alla segreteria del personale di reimpostarla.';
@@ -205,7 +206,7 @@ function disegnaShell() {
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="lato">
-      <div class="marchio"><img src="/icona.svg" alt=""><div><b>Sportello Personale</b><small>${esc(IO.scuola)}</small></div></div>
+      <div class="marchio"><img src="/icona.svg" alt=""><div><b>WolfDesk</b><small>${esc(IO.scuola || 'Sportello del personale')}</small></div></div>
       ${v.map(([k, n, h]) => `<a class="voce" data-voce="${k}" href="${h}">${ico(k)}<span>${n}</span><span class="bollo-slot" data-b="${k}"></span></a>`).join('')}
       <div class="sotto"><b style="color:var(--text)">${esc(u.nome)} ${esc(u.cognome)}</b><br>${esc(u.ruolo_nome)} · a.s. ${esc(IO.anno)}</div>
     </aside>
@@ -236,7 +237,7 @@ function disegnaShell() {
 
 function disegnaBadge() {
   $$('.bollo-slot').forEach(s => { s.innerHTML = bollo(BADGE[s.dataset.b]); });
-  document.title = (BADGE.notifiche ? `(${BADGE.notifiche}) ` : '') + 'Sportello Personale';
+  document.title = (BADGE.notifiche ? `(${BADGE.notifiche}) ` : '') + 'WolfDesk';
 }
 
 async function aggiornaBadge() {
@@ -709,7 +710,7 @@ async function vistaPresenze(c, m, q) {
   if (IO.staff) utenti = await api('/api/utenti');
   const target = q.utente || (IO.timbrature ? IO.utente.id : utenti.find(u => u.categoria === 'ata' && u.attivo)?.id);
   if (!target) {
-    c.innerHTML = `<h1>Cartellini</h1><div class="card vuoto">Non c'è ancora personale ATA nello Sportello.<br>I cartellini compaiono quando i collaboratori entrano con Argo o vengono aggiunti in Gestione › Personale.</div>`;
+    c.innerHTML = `<h1>Cartellini</h1><div class="card vuoto">Non c'è ancora personale ATA in WolfDesk.<br>I cartellini compaiono quando i collaboratori entrano con Argo o vengono aggiunti in Gestione › Personale.</div>`;
     return;
   }
   const k = await api(`/api/cartellino?mese=${mese}&utente=${target}`);
@@ -913,7 +914,7 @@ function schedaDipendente(u) {
       <label class="campo"><span>Ferie residue anno precedente</span><input type="number" name="ferie_ap" min="0" max="40" value="${u.ferie_ap}"></label>
       <label class="campo"><span>Utente Argo</span><input type="text" name="argo_utente" value="${esc(u.argo_utente || '')}" autocapitalize="none" spellcheck="false" placeholder="nome utente del portale Argo"><small>Per entrare con le credenziali Argo</small></label>
     </div>
-    ${nuovo ? `<label class="spunta"><input type="checkbox" name="solo_argo"><span>Entra solo con Argo (nessuna password dello Sportello)</span></label>` : (u.solo_argo ? '<p class="muted piccolo">Entra solo con Argo. «Reimposta password» gli dà anche una password dello Sportello.</p>' : '')}
+    ${nuovo ? `<label class="spunta"><input type="checkbox" name="solo_argo"><span>Entra solo con Argo (nessuna password di WolfDesk)</span></label>` : (u.solo_argo ? '<p class="muted piccolo">Entra solo con Argo. «Reimposta password» gli dà anche una password di WolfDesk.</p>' : '')}
     ${nuovo ? '' : `<label class="spunta"><input type="checkbox" name="attivo" ${u.attivo ? 'checked' : ''}><span>Account attivo</span></label>`}
     </form>
     ${nuovo ? '' : `<div class="riga" style="margin-top:6px"><a class="btn mini" href="#/situazione?utente=${u.id}">Situazione</a><a class="btn mini" href="#/presenze?utente=${u.id}">Cartellino</a><a class="btn mini" href="#/gestione/richieste?utente=${u.id}">Richieste</a><button class="btn mini pericolo" id="u-pw">Reimposta password</button></div>`}
@@ -973,11 +974,11 @@ async function gImpostazioni(g) {
 // ------------------------------------------------------------------ profilo
 async function vistaProfilo(c) {
   const u = IO.utente;
-  const tema = (() => { try { return localStorage.getItem('sp-tema') || 'auto'; } catch { return 'auto'; } })();
+  const tema = (() => { try { return localStorage.getItem('sp-tema') === 'light' ? 'light' : 'dark'; } catch { return 'dark'; } })();
   c.innerHTML = `<div class="due" style="align-items:start">
     <div class="card"><div class="riga" style="margin-bottom:14px"><span class="avatar" style="width:54px;height:54px;font-size:1.1rem">${esc(iniziali(u))}</span><div><h1 style="margin:0">${esc(u.nome)} ${esc(u.cognome)}</h1><div class="muted">${esc(u.ruolo_nome)}</div></div></div>
       <dl class="dati"><dt>Nome utente</dt><dd>${esc(u.username)}</dd><dt>Profilo</dt><dd>${esc(u.profilo || '—')}</dd><dt>Plesso</dt><dd>${esc(u.plesso || '—')}</dd><dt>Email</dt><dd>${esc(u.email || '—')}</dd></dl>
-      <div class="sezione"><h3>Aspetto</h3><div class="filtri">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([k, n]) => `<button class="pillola ${tema === k ? 'attiva' : ''}" data-tema="${k}">${n}</button>`).join('')}</div></div>
+      <div class="sezione"><h3>Aspetto</h3><div class="filtri">${[['dark', 'Scuro viola'], ['light', 'Chiaro lavanda']].map(([k, n]) => `<button class="pillola ${tema === k ? 'attiva' : ''}" data-tema="${k}">${n}</button>`).join('')}</div></div>
       <button class="btn pericolo" id="p-esci">${ico('esci')} Esci</button></div>
     ${u.solo_argo ? `<div class="card"><h2>Accesso</h2><p>Entri con le credenziali del portale Argo (utente <b>${esc(u.argo_utente)}</b>). La password si cambia sul portale Argo.</p></div>` : `
     <form class="card" id="f-pw"><h2>Cambia password</h2>

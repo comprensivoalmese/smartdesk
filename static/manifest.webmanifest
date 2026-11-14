@@ -1,9 +1,9 @@
 {
-  "name": "Sportello Personale",
-  "short_name": "Sportello",
+  "name": "WolfDesk – Sportello del personale",
+  "short_name": "WolfDesk",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f4f6f9",
-  "theme_color": "#1f5f8b",
+  "background_color": "#090615",
+  "theme_color": "#0b0719",
   "icons": [{ "src": "/icona.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }

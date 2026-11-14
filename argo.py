@@ -75,7 +75,7 @@ def _segui(op, url, dati=None, ritorno=None):
 def _campi_modulo(html, id_modulo):
     modulo = re.search(rf'<form\b[^>]*id="{id_modulo}".*?</form>', html, re.S)
     if not modulo:
-        raise ErroreArgo("La pagina di accesso di Argo è cambiata: avvisa l'amministratore dello Sportello.")
+        raise ErroreArgo("La pagina di accesso di Argo è cambiata: avvisa l'amministratore di WolfDesk.")
     campi = {}
     for campo in re.findall(r"<input\b[^>]*>", modulo.group(0)):
         nome = re.search(r'name="([^"]*)"', campo)
@@ -87,10 +87,10 @@ def _campi_modulo(html, id_modulo):
 
 def _motivo(html):
     if 'id="otpForm"' in html:
-        return ("Il tuo account Argo chiede il secondo codice (OTP): lo Sportello non lo gestisce ancora. "
-                "Entra con l'account dello Sportello.")
+        return ("Il tuo account Argo chiede il secondo codice (OTP): WolfDesk non lo gestisce ancora. "
+                "Entra con l'account di WolfDesk.")
     if 'id="selectForm"' in html:
-        return "Argo chiede di scegliere tra più profili: lo Sportello non lo gestisce ancora."
+        return "Argo chiede di scegliere tra più profili: WolfDesk non lo gestisce ancora."
     if 'id="consentForm"' in html:
         return "Argo chiede di accettare un consenso: entra una volta su portaleargo.it e accettalo."
     if 'id="loginForm"' in html:

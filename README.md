@@ -1,4 +1,4 @@
-# Sportello Personale
+# WolfDesk – Sportello del personale
 
 App web per le esigenze del personale scolastico (docenti e ATA). Fa le stesse cose di Argo Unica:
 le richieste di assenza passano da un percorso di autorizzazione, la bacheca chiede presa visione o

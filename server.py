@@ -871,7 +871,7 @@ def utente_da_argo(c, digitato, claims):
     for x in c.execute("SELECT * FROM utenti WHERE argo_utente<>''").fetchall():
         if x["argo_utente"].lower() in chiavi:
             if not x["attivo"]:
-                raise Errore("Il tuo account dello Sportello è disattivato: chiedi alla segreteria.", 403)
+                raise Errore("Il tuo account di WolfDesk è disattivato: chiedi alla segreteria.", 403)
             if x["cognome"] == "(da completare)" and idn["cognome"]:
                 c.execute("UPDATE utenti SET nome=?, cognome=? WHERE id=?", (idn["nome"] or x["nome"], idn["cognome"], x["id"]))
             return c.execute("SELECT * FROM utenti WHERE id=?", (x["id"],)).fetchone()
@@ -882,7 +882,7 @@ def utente_da_argo(c, digitato, claims):
             c.execute("UPDATE utenti SET argo_utente=? WHERE id=?", (digitato.lower(), cand[0]["id"]))
             return c.execute("SELECT * FROM utenti WHERE id=?", (cand[0]["id"],)).fetchone()
     if imp.get("argo_nuovi") != "1":
-        raise Errore("Le credenziali Argo sono giuste, ma il tuo account non è ancora collegato allo Sportello: "
+        raise Errore("Le credenziali Argo sono giuste, ma il tuo account non è ancora collegato a WolfDesk: "
                      "chiedi alla segreteria di inserire il tuo nome utente Argo nella tua scheda.", 403)
     codice = imp.get("argo_codice_scuola", "").strip().upper()
     if idn["codice_da_utente"]:
@@ -1866,7 +1866,7 @@ def crea_demo():
          "1. Approvazione del verbale della seduta precedente\n2. Piano annuale delle attività\n3. Progetti PTOF\n"
          "4. Varie ed eventuali", "docenti", 1, 0, None),
         ("Piano ferie estive del personale ATA",
-         "Il personale ATA è invitato a presentare la richiesta di ferie estive tramite lo Sportello entro la fine "
+         "Il personale ATA è invitato a presentare la richiesta di ferie estive tramite WolfDesk entro la fine "
          "del mese, per permettere la stesura del piano di servizio.", "ata", 1, 0, None),
         ("Orario di ricevimento della segreteria",
          "La segreteria del personale riceve dal lunedì al venerdì dalle 10:00 alle 12:00 e il martedì anche dalle "
@@ -1880,7 +1880,7 @@ def crea_demo():
         if i == 2:
             aid = uuid.uuid4().hex
             pdf = pdf_semplice(["Convocazione del Collegio dei docenti", "", "Ordine del giorno allegato.",
-                                "(documento di prova generato dallo Sportello)"])
+                                "(documento di prova generato da WolfDesk)"])
             with open(os.path.join(DATI, "allegati", aid), "wb") as f:
                 f.write(pdf)
             c.execute("INSERT INTO allegati VALUES (?,?,?,?,?,?,?,?)", (aid, "circolare", cur.lastrowid,
@@ -1908,7 +1908,7 @@ def crea_demo():
                          ora.isoformat()))
         aid = uuid.uuid4().hex
         pdf = pdf_semplice([f"Cedolino {mese_prec.strftime('%m/%Y')} - documento di prova",
-                            f"Dipendente: {un}", "", "Questo file serve solo a provare lo Sportello."])
+                            f"Dipendente: {un}", "", "Questo file serve solo a provare WolfDesk."])
         with open(os.path.join(DATI, "allegati", aid), "wb") as f:
             f.write(pdf)
         c.execute("INSERT INTO allegati VALUES (?,?,?,?,?,?,?,?)", (aid, "documento", cur.lastrowid,
@@ -1923,7 +1923,7 @@ def crea_demo():
 
 def main():
     global DATI
-    p = argparse.ArgumentParser(description="Sportello Personale")
+    p = argparse.ArgumentParser(description="WolfDesk - sportello del personale")
     p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 per accettare i telefoni della rete")
     p.add_argument("--porta", type=int, default=8850)
     p.add_argument("--dati", help="cartella dei dati (database e allegati)")
@@ -1971,7 +1971,7 @@ def main():
         pw = crea_demo()
         if pw:
             with open(os.path.join(DATI, "credenziali-demo.txt"), "w", encoding="utf-8") as f:
-                f.write("Account di prova dello Sportello Personale (tutti con la stessa password)\n\n"
+                f.write("Account di prova di WolfDesk (tutti con la stessa password)\n\n"
                         "Utenti: dirigente, dsga, segreteria, g.rinaldi, s.conti, e.marino, f.colombo (docenti),\n"
                         "        a.ricci, r.greco, d.fontana (ATA)\n\n"
                         f"Password: {pw}\n")
@@ -1992,7 +1992,7 @@ def main():
     if not a.demo:
         threading.Thread(target=ciclo_bacheca_argo, daemon=True).start()
     srv = ThreadingHTTPServer((a.host, a.porta), Gestore)
-    print(f"Sportello Personale in ascolto su http://{'localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host}"
+    print(f"WolfDesk in ascolto su http://{'localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host}"
           f":{a.porta}  (Ctrl+C per fermare)")
     try:
         srv.serve_forever()
