@@ -241,6 +241,27 @@ def main():
     s, lst = doc.chiama("/api/circolari?q=collegio")
     controlla(len(lst) == 1, "ricerca in bacheca")
 
+    print("Bacheca dal feed pubblico Argo")
+    ora_ms = int(dt.datetime.now().timestamp() * 1000)
+    feed = {"categorie": [{"key": "k1", "descrizione": "Circolari"}], "items": [
+        {"key": "a1", "titolo": "Circolare 50 - Assemblea sindacale", "descrizione": "Circolare 50 - Assemblea sindacale",
+         "categorie": ["k1"], "lastModifiedAt": ora_ms, "files": [
+             {"filename": "c50.pdf", "url": "https://esempio.it/c50"}, {"filename": "sigillo_c50.pdf", "url": "https://esempio.it/s"}]},
+        {"key": "vecchia", "titolo": "Dell'anno scorso", "categorie": [], "lastModifiedAt": ora_ms - 400 * 86400000, "files": []}]}
+    with server.db() as c0:
+        c0.execute("UPDATE impostazioni SET valore='SC99999' WHERE chiave='argo_codice_scuola'")
+        n1 = server.importa_bacheca_argo(c0, lambda url: feed)
+        n2 = server.importa_bacheca_argo(c0, lambda url: feed)
+    controlla(n1 == 1 and n2 == 0, "importata una volta sola, l'anno scorso escluso")
+    s, lst = doc.chiama("/api/circolari?q=assemblea")
+    controlla(len(lst) == 1 and lst[0]["fonte"] == "argo" and lst[0]["n_allegati"] == 1, "visibile in bacheca, senza la copia sigillata")
+    s, det = doc.chiama(f"/api/circolari/{lst[0]['id']}")
+    controlla(det["link_esterni"] == [{"nome": "c50.pdf", "url": "https://esempio.it/c50"}], "link al PDF di Argo")
+    feed["items"] = feed["items"][1:]
+    with server.db() as c0:
+        server.importa_bacheca_argo(c0, lambda url: feed)
+    controlla(not doc.chiama("/api/circolari?q=assemblea")[1], "tolta da Argo: tolta anche qui")
+
     print("Timbrature e cartellino")
     s, e = ata.chiama("/api/timbra", {"verso": "U"})
     controlla(s == 400, "uscita senza entrata bloccata")

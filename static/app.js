@@ -585,7 +585,7 @@ function elemCircolare(ci) {
   const daLeggere = ci.presa_visione && !ci.letta;
   return `<a class="elem" href="#/circolare/${ci.id}">
     <span class="ico">${ico('bacheca')}</span>
-    <span class="testo"><b>n. ${ci.numero} · ${esc(ci.titolo)}</b><span>${fd(ci.data)} · ${esc(DEST[ci.destinatari])}${ci.n_allegati ? ' · 📎' + ci.n_allegati : ''}</span></span>
+    <span class="testo"><b>${ci.fonte === 'argo' ? '' : 'n. ' + ci.numero + ' · '}${esc(ci.titolo)}</b><span>${fd(ci.data)} · ${ci.fonte === 'argo' ? 'Argo' + (ci.categoria ? ' – ' + esc(ci.categoria) : '') : esc(DEST[ci.destinatari])}${ci.n_allegati ? ' · 📎' + ci.n_allegati : ''}</span></span>
     <span class="destra">${daLeggere ? `<span class="chip nonletta">${ci.adesione ? 'Da rispondere' : 'Da leggere'}</span>` : ci.letta ? `<span class="chip letta">${ci.risposta ? esc(ci.risposta) : 'Letta'}</span>` : ''}</span></a>`;
 }
 
@@ -593,7 +593,9 @@ async function vistaBacheca(c, m, q) {
   const filtro = q.filtro || 'tutte';
   c.innerHTML = `
     <div class="riga" style="margin-bottom:16px"><h1 style="margin:0">Bacheca</h1><span class="spazio"></span>
+      ${IO.staff && IO.impostazioni.argo_codice_scuola ? `<button class="btn" id="agg-argo">Aggiorna da Argo</button>` : ''}
       ${IO.staff ? `<a class="btn primario" href="#/nuova-circolare">${ico('piu')} Nuova circolare</a>` : ''}</div>
+    ${IO.impostazioni.argo_codice_scuola && IO.impostazioni.argo_bacheca === '1' ? `<p class="muted piccolo" style="margin-top:-8px">Comprende le pubblicazioni di «La Segreteria Comunica» di Argo (${esc(IO.impostazioni.argo_codice_scuola)}), aggiornate ogni 30 minuti. Le circolari interne di DidUP non ci sono.</p>` : ''}
     <div class="filtri">
       <input type="search" id="cerca" placeholder="Cerca per titolo, testo o numero…" value="${esc(q.q || '')}" style="max-width:380px">
       ${[['tutte', 'Tutte'], ['da-leggere', 'Da leggere']].map(([k, n]) => `<button class="pillola ${filtro === k ? 'attiva' : ''}" data-f="${k}">${n}</button>`).join('')}
@@ -607,13 +609,19 @@ async function vistaBacheca(c, m, q) {
   };
   let tt = null;
   $('#cerca').oninput = () => { clearTimeout(tt); tt = setTimeout(carica, 250); };
+  $('#agg-argo')?.addEventListener('click', async e => {
+    e.target.disabled = true;
+    try { const r = await api('/api/circolari/aggiorna-argo', {}); toast(r.nuove ? `${r.nuove} pubblicazioni nuove da Argo.` : 'Bacheca già aggiornata.'); await carica(); } catch (err) { toast(err.message, true); }
+    e.target.disabled = false;
+  });
   $$('[data-f]', c).forEach(b => b.onclick = () => { filtroAtt = b.dataset.f; $$('[data-f]', c).forEach(x => x.classList.toggle('attiva', x === b)); carica(); });
   await carica();
 }
 
 async function vistaCircolare(c, m) {
   const ci = await api('/api/circolari/' + m[1]);
-  $('#titolo').textContent = `Circolare n. ${ci.numero}`;
+  const daArgo = ci.fonte === 'argo';
+  $('#titolo').textContent = daArgo ? 'Bacheca' : `Circolare n. ${ci.numero}`;
   const scaduta = ci.scadenza && ci.scadenza < oggiIso();
   let azione = '';
   if (ci.adesione) {
@@ -628,10 +636,10 @@ async function vistaCircolare(c, m) {
   const st = ci.statistiche;
   c.innerHTML = `
     <a href="#/bacheca" class="riga piccolo" style="text-decoration:none;margin-bottom:10px">${ico('indietro').replace('<svg', '<svg style="width:16px"')} Bacheca</a>
-    <div class="card"><div class="muted piccolo">Circolare n. ${ci.numero} · a.s. ${esc(ci.anno)} · ${fd(ci.data)} · ${esc(DEST[ci.destinatari])}</div>
+    <div class="card"><div class="muted piccolo">${daArgo ? `Argo – La Segreteria Comunica${ci.categoria ? ' · ' + esc(ci.categoria) : ''}` : `Circolare n. ${ci.numero} · a.s. ${esc(ci.anno)}`} · ${fd(ci.data)}${daArgo ? '' : ' · ' + esc(DEST[ci.destinatari])}</div>
       <h1 style="margin-top:6px">${esc(ci.titolo)}</h1>
       <div class="testo-circ">${esc(ci.testo)}</div>
-      ${ci.allegati.length ? `<div class="sezione">${ci.allegati.map(a => `<a class="allegato" href="/api/allegati/${a.id}" target="_blank" rel="noopener">${ico('documenti')} ${esc(a.nome)}</a>`).join('')}</div>` : ''}
+      ${ci.allegati.length || ci.link_esterni.length ? `<div class="sezione">${ci.allegati.map(a => `<a class="allegato" href="/api/allegati/${a.id}" target="_blank" rel="noopener">${ico('documenti')} ${esc(a.nome)}</a>`).join('')}${ci.link_esterni.map(a => `<a class="allegato" href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">${ico('documenti')} ${esc(a.nome)}</a>`).join('')}</div>` : ''}
     </div>
     ${azione}
     ${st ? `<div class="card"><div class="riga"><h2 style="margin:0">Letture</h2><span class="spazio"></span><a class="btn mini" href="/api/circolari/${ci.id}/letture.csv">${ico('scarica')} CSV</a></div>
@@ -687,6 +695,10 @@ async function vistaPresenze(c, m, q) {
   let utenti = null;
   if (IO.staff) utenti = await api('/api/utenti');
   const target = q.utente || (IO.timbrature ? IO.utente.id : utenti.find(u => u.categoria === 'ata' && u.attivo)?.id);
+  if (!target) {
+    c.innerHTML = `<h1>Cartellini</h1><div class="card vuoto">Non c'è ancora personale ATA nello Sportello.<br>I cartellini compaiono quando i collaboratori entrano con Argo o vengono aggiunti in Gestione › Personale.</div>`;
+    return;
+  }
   const k = await api(`/api/cartellino?mese=${mese}&utente=${target}`);
   const mio = k.utente.id === IO.utente.id;
   const oggiT = mio && IO.timbrature ? (k.giorni.find(g => g.data === oggiIso())?.timbrature || []) : null;

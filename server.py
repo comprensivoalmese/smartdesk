@@ -18,8 +18,10 @@ import re
 import secrets
 import sqlite3
 import sys
+import threading
 import time
 import unicodedata
+import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
@@ -273,6 +275,8 @@ IMPOSTAZIONI_BASE = {
     "argo_codice_scuola": "",    # es. SC15290: per creare account nuovi deve comparire nei dati Argo
     "argo_nuovi": "0",           # crea l'account al primo accesso Argo se non c'è
     "argo_ruolo_nuovi": "docente",
+    "argo_bacheca": "1",         # importa il feed pubblico "La Segreteria Comunica" del codice scuola
+    "argo_bacheca_ultima": "",   # ultima importazione riuscita
 }
 
 
@@ -291,6 +295,10 @@ def prepara_db():
         colonne = {r["name"] for r in c.execute("PRAGMA table_info(utenti)")}
         if "argo_utente" not in colonne:
             c.execute("ALTER TABLE utenti ADD COLUMN argo_utente TEXT DEFAULT ''")
+        colonne = {r["name"] for r in c.execute("PRAGMA table_info(circolari)")}
+        for col in ("fonte", "chiave_esterna", "categoria", "link_esterni"):
+            if col not in colonne:
+                c.execute(f"ALTER TABLE circolari ADD COLUMN {col} TEXT DEFAULT ''")
         for k, v in IMPOSTAZIONI_BASE.items():
             c.execute("INSERT OR IGNORE INTO impostazioni VALUES (?,?)", (k, v))
 
@@ -636,6 +644,74 @@ def timbrature_abilitate(c, u):
 
 
 # ---------------------------------------------------------------- circolari
+FEED_ARGO = "https://sgd2awp.portaleargo.it/sgd2awp/all/{codice}"
+
+
+def importa_bacheca_argo(c, scarica=None):
+    """Copia nella bacheca le pubblicazioni del feed pubblico Argo dell'anno scolastico in corso.
+    Restituisce il numero di pubblicazioni nuove."""
+    imp = impostazioni(c)
+    codice = imp.get("argo_codice_scuola", "").strip().upper()
+    if imp.get("argo_bacheca") != "1" or not re.fullmatch(r"SC\d+", codice):
+        return 0
+    if scarica is None:
+        def scarica(url):
+            req = urllib.request.Request(url, headers={"User-Agent": "SportelloPersonale/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read())
+    dati = scarica(FEED_ARGO.format(codice=codice))
+    categorie = {x["key"]: x["descrizione"] for x in dati.get("categorie", [])}
+    da = dt.datetime.combine(inizio_anno(), dt.time())
+    presenti = {r["chiave_esterna"]: r for r in c.execute("SELECT * FROM circolari WHERE fonte='argo'")}
+    prima_volta = not presenti
+    visti, nuove = set(), 0
+    for v in dati.get("items", []):
+        quando = dt.datetime.fromtimestamp(v["lastModifiedAt"] / 1000).replace(microsecond=0)
+        if quando < da or not v.get("key"):
+            continue
+        visti.add(v["key"])
+        nomi = {f["filename"] for f in v.get("files", [])}
+        link = [{"nome": f["filename"], "url": f["url"]} for f in v.get("files", [])
+                if not f["filename"].startswith("sigillo_") and not (
+                    f["filename"].lower().endswith(".docx") and (f["filename"][:-5] + ".pdf") in nomi)
+                and str(f.get("url", "")).startswith("https://")]
+        cat = ", ".join(categorie.get(k, "") for k in v.get("categorie", []) if categorie.get(k))
+        testo = v.get("descrizione") if v.get("descrizione") and v.get("descrizione") != v.get("titolo") else ""
+        valori = (v.get("titolo", "")[:200], testo, cat, json.dumps(link, ensure_ascii=False), quando.isoformat())
+        if v["key"] in presenti:
+            r = presenti[v["key"]]
+            if (r["titolo"], r["testo"], r["categoria"], r["link_esterni"], r["data"]) != valori:
+                c.execute("UPDATE circolari SET titolo=?, testo=?, categoria=?, link_esterni=?, data=? WHERE id=?",
+                          valori + (r["id"],))
+            continue
+        cur = c.execute("INSERT INTO circolari (numero,anno,titolo,testo,destinatari,presa_visione,adesione,scadenza,"
+                        "data,autore_id,fonte,chiave_esterna,categoria,link_esterni) VALUES "
+                        "(0,?,?,?,'tutti',0,0,NULL,?,NULL,'argo',?,?,?)",
+                        (nome_anno(), valori[0], testo, quando.isoformat(), v["key"], cat, valori[3]))
+        nuove += 1
+        if not prima_volta:
+            for x in c.execute("SELECT id FROM utenti WHERE attivo=1").fetchall():
+                notifica(c, x["id"], f"Nuova in bacheca (Argo): {valori[0]}", f"#/circolare/{cur.lastrowid}")
+    for chiave, r in presenti.items():
+        if chiave not in visti and r["data"] >= da.isoformat():
+            c.execute("DELETE FROM letture WHERE circolare_id=?", (r["id"],))
+            c.execute("DELETE FROM circolari WHERE id=?", (r["id"],))
+    c.execute("UPDATE impostazioni SET valore=? WHERE chiave='argo_bacheca_ultima'", (adesso().isoformat(),))
+    return nuove
+
+
+def ciclo_bacheca_argo():
+    while True:
+        try:
+            with db() as c:
+                n = importa_bacheca_argo(c)
+            if n:
+                print(f"Bacheca Argo: {n} pubblicazioni nuove")
+        except Exception as e:  # noqa: BLE001 - la rete può mancare: si riprova al giro dopo
+            print(f"Bacheca Argo non aggiornata ({e.__class__.__name__})")
+        time.sleep(30 * 60)
+
+
 def circolare_visibile(u, ci):
     return u["ruolo"] in STAFF or ci["destinatari"] == "tutti" or \
         (ci["destinatari"] == "docenti" and categoria(u) == "docente") or \
@@ -1218,7 +1294,8 @@ def api_circolari(c, u, m, corpo, q, req):
         d["letta"] = ci["id"] in lette
         d["risposta"] = lette.get(ci["id"], "")
         d["n_allegati"] = c.execute("SELECT COUNT(*) FROM allegati WHERE proprietario='circolare' AND rif_id=?",
-                                    (ci["id"],)).fetchone()[0]
+                                    (ci["id"],)).fetchone()[0] + len(json.loads(ci["link_esterni"] or "[]"))
+        d.pop("link_esterni", None)
         if q.get("da_leggere") and (d["letta"] or not ci["presa_visione"]):
             continue
         out.append(d)
@@ -1236,7 +1313,8 @@ def api_circolare(c, u, m, corpo, q, req):
     d["risposta"] = let["risposta"] if let else ""
     d["quando_letta"] = let["quando"] if let else ""
     d["allegati"] = elenco_allegati(c, "circolare", ci["id"])
-    if u["ruolo"] in STAFF:
+    d["link_esterni"] = json.loads(ci["link_esterni"] or "[]")
+    if u["ruolo"] in STAFF and ci["fonte"] != "argo":
         letture = {r["utente_id"]: r for r in c.execute("SELECT * FROM letture WHERE circolare_id=?", (ci["id"],))}
         dest = destinatari_circolare(c, ci)
         d["statistiche"] = {
@@ -1247,6 +1325,18 @@ def api_circolare(c, u, m, corpo, q, req):
                         "quando": letture[x["id"]]["quando"] if x["id"] in letture else "",
                         "risposta": letture[x["id"]]["risposta"] if x["id"] in letture else ""} for x in dest]}
     return d
+
+
+@rotta("POST", "/api/circolari/aggiorna-argo", ruoli=STAFF)
+def api_aggiorna_argo(c, u, m, corpo, q, req):
+    imp = impostazioni(c)
+    if imp.get("argo_bacheca") != "1" or not imp.get("argo_codice_scuola"):
+        raise Errore("Manca il codice scuola Argo (Gestione › Impostazioni).")
+    try:
+        n = importa_bacheca_argo(c)
+    except Exception as e:  # noqa: BLE001
+        raise Errore(f"Argo non raggiungibile ({e.__class__.__name__}).", 502)
+    return {"ok": True, "nuove": n}
 
 
 @rotta("GET", r"/api/circolari/(\d+)/letture\.csv", ruoli=STAFF)
@@ -1328,6 +1418,8 @@ def api_timbra(c, u, m, corpo, q, req):
 @rotta("GET", "/api/cartellino")
 def api_cartellino(c, u, m, corpo, q, req):
     target = u
+    if q.get("utente") and not q["utente"].isdigit():
+        raise Errore("Dipendente non valido.")
     if q.get("utente") and int(q["utente"]) != u["id"]:
         if u["ruolo"] not in STAFF:
             raise Errore("Non autorizzato.", 403)
@@ -1513,6 +1605,8 @@ class Gestore(BaseHTTPRequestHandler):
         if not url.path.startswith("/api/"):
             return self.statico(url.path) if metodo == "GET" else self.errore(405, "Metodo non consentito")
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
+        if "utente" in q and not q["utente"].isdigit():
+            return self.errore(400, "Dipendente non valido.")
         corpo = {}
         if metodo == "POST":
             n = int(self.headers.get("Content-Length") or 0)
@@ -1804,6 +1898,8 @@ def main():
         with open(os.path.join(DATI, "primo-accesso.txt"), "w", encoding="utf-8") as f:
             f.write(f"Utente: {un}\nPassword provvisoria: {pw}\n(al primo accesso verrà chiesto di cambiarla)\n")
         print(f"Account creato. Password provvisoria in {os.path.join(DATI, 'primo-accesso.txt')}")
+    if not a.demo:
+        threading.Thread(target=ciclo_bacheca_argo, daemon=True).start()
     srv = ThreadingHTTPServer((a.host, a.porta), Gestore)
     print(f"Sportello Personale in ascolto su http://{'localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host}"
           f":{a.porta}  (Ctrl+C per fermare)")
