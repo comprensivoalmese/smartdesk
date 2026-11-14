@@ -287,7 +287,7 @@ async function vistaAssenze(c) {
       `<a class="pillola ${filtro === k ? 'attiva' : ''}" href="#/assenze?f=${k}" style="text-decoration:none;color:inherit">${n}</a>`).join('')}</div>
     <p class="muted piccolo">Come in Unica: l'annullamento arriva alla segreteria con il motivo e gli allegati.</p>
     <div class="lista">${voci.length ? voci.map(elemAssenza).join('') : '<div class="card vuoto">Nessuna assenza.</div>'}</div>`;
-  $$('[data-annulla]', c).forEach(b => b.onclick = () => finestraAnnulla(b.dataset.annulla, b.dataset.cosa));
+  $$('[data-annulla]', c).forEach(b => b.onclick = () => finestraAnnulla(b.dataset.annulla, b.dataset.cosa, !!b.dataset.bozza));
 }
 
 function elemAssenza(x) {
@@ -299,10 +299,23 @@ function elemAssenza(x) {
   const cosa = `${x.descrizione || 'Assenza'} – ${periodo(x)}`;
   return `<div class="elem"><span class="testo"><b>${esc(x.descrizione || 'Assenza')}</b>
       <span>${esc(periodo(x))}${x.oraria && x.ora_dal ? `, ${esc(x.ora_dal)}–${esc(x.ora_al)}` : ''}${q ? ' · ' + q : ''}${x.genere === 'assenza' && !x.richiesta ? ' · inserita dalla segreteria' : ''}</span></span>
-    <span class="destra">${stato}${annullabile ? `<button class="btn mini pericolo" data-annulla="${esc(rich.id)}" data-cosa="${esc(cosa)}">Annulla</button>` : ''}</span></div>`;
+    <span class="destra">${stato}${annullabile ? `<button class="btn mini pericolo" data-annulla="${esc(rich.id)}"${rich.stato === 'NEW' ? ' data-bozza="1"' : ''} data-cosa="${esc(cosa)}">Annulla</button>` : ''}</span></div>`;
 }
 
-function finestraAnnulla(id, cosa) {
+function finestraAnnulla(id, cosa, bozza) {
+  if (bozza) {  // bozza mai inoltrata: come in Argo Personale si annulla subito, senza motivo
+    const f = finestra(`<h2>Annulla la bozza</h2>
+      <p class="muted">${esc(cosa)}. È una bozza salvata su Argo e mai inviata: la segreteria non l'ha vista, quindi non serve il motivo.</p>
+      <div class="piede"><button class="btn" data-chiudi>Indietro</button><button class="btn pericolo" id="an-ok">Annulla la bozza</button></div>`);
+    $('#an-ok', f.el).onclick = async e => {
+      e.target.disabled = true; e.target.textContent = 'Invio…';
+      try {
+        const r = await chiama('annulla', { richiesta: id });
+        f.chiudi(); DATI = r.dati; scrivi('dati', DATI); toast('Bozza annullata.'); naviga();
+      } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Annulla la bozza'; }
+    };
+    return;
+  }
   const f = finestra(`<h2>Chiedi l'annullamento</h2>
     <p class="muted">${esc(cosa)}. L'annullamento arriva alla segreteria, come da Unica.</p>
     <label class="campo"><span>Motivo dell'annullamento <small class="muted" id="an-conta">0/250</small></span><textarea id="an-nota" maxlength="250"></textarea></label>

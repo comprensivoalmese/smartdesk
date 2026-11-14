@@ -348,6 +348,16 @@ def _personale_h(s):
             "argo-client-version": PERSONALE_VERSIONE, "argo-client-type": "wwp.web"}
 
 
+def annulla_bozza_personale(s, rif):
+    """Annulla una richiesta rimasta in bozza (mai inoltrata), come Argo Personale: PUT richiestascodip/annulla/new/<uid>,
+    senza motivo, perché la segreteria non l'ha mai vista."""
+    r = _json(PERSONALE_API + "richiestascodip/annulla/new/" + urllib.parse.quote(str(rif["uid"]), safe=""), None,
+              _personale_h(s), metodo="PUT")
+    if r.get("success") is False:
+        raise ErroreArgo("il programma Personale non ha annullato la bozza" + (f": {r.get('msg')}" if r.get("msg") else ""))
+    return r.get("msg") or ""
+
+
 def annulla_richiesta_personale(s, rif, motivo):
     """Chiede l'annullamento di una richiesta di assenza già inoltrata o formalizzata, come il pulsante
     «Annulla» di Unica / Argo Personale (PUT richiestascodip/annulla/fwd con il motivo, max 250 caratteri)."""

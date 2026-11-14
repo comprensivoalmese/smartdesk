@@ -8,6 +8,7 @@
       { id: 'R1', inizio: `${a0}-10-13`, fine: `${a0}-10-14`, stato: 'DEF', stato_nome: 'Registrata', tipo: 'motivi_personali', descrizione: 'Permesso per motivi personali o familiari', oraria: false, annullabile: true },
       { id: 'R2', inizio: `${a0}-10-22`, fine: `${a0}-10-22`, stato: 'DEF', stato_nome: 'Registrata', tipo: 'motivi_personali', descrizione: 'Permesso per motivi personali o familiari', oraria: false, annullabile: true },
       { id: 'R3', inizio: g(9), fine: g(10), stato: 'FWD', stato_nome: 'Inoltrata', tipo: 'ferie', descrizione: 'Ferie', oraria: false, annullabile: true },
+      { id: 'R4', inizio: g(20), fine: g(20), stato: 'NEW', stato_nome: 'Bozza', tipo: 'motivi_personali', descrizione: 'Permesso per motivi personali o familiari', oraria: false, annullabile: true },
     ],
     assenze: [
       { inizio: `${a0}-10-13`, fine: `${a0}-10-14`, giorni: 2, ore: 0, oraria: false, tipo: 'motivi_personali', descrizione: 'Permesso per motivi personali o familiari', richiesta: 'R1' },
@@ -37,6 +38,7 @@
       case 'annulla': {
         const r = stato.richieste.find(x => x.id === c.richiesta);
         if (!r || !r.annullabile) return errore('Richiesta non trovata.');
+        if (r.stato === 'NEW') { Object.assign(r, { stato: 'NUL', stato_nome: 'Annullata', annullabile: false }); return { ok: true, bozza: true, messaggio: 'Bozza annullata', allegati_non_caricati: [], dati: dati() }; }
         if (!c.motivo || c.motivo.length > 250) return errore('Il motivo deve avere da 1 a 250 caratteri.');
         r.stato = r.stato === 'DEF' ? 'NOF' : 'NUL'; r.stato_nome = r.stato === 'NOF' ? 'Annullata dopo la registrazione' : 'Annullata'; r.annullabile = false;
         return { ok: true, messaggio: 'Annullamento inviato', allegati_non_caricati: [], dati: dati() };

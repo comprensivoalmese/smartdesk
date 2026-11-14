@@ -451,7 +451,7 @@ def salva_assenze_argo(c, utente_id, dati):
         """La richiesta Argo che ha generato l'assenza, per poterla annullare come in Unica: prima quella con le
         stesse date, poi una dello stesso tipo che si sovrappone al periodo dell'assenza."""
         ini, fin = str(a["inizio"])[:10], str(a.get("fine") or a["inizio"])[:10]
-        valide = [r for r in dati.get("richieste", []) if r.get("rif") and r.get("stato") not in ARGO_CHIUSE]
+        valide = [r for r in dati.get("richieste", []) if r.get("rif") and r.get("stato") not in ARGO_CHIUSE + ("NEW",)]
         uguali = [r for r in valide if str(r.get("inizio"))[:10] == ini and str(r.get("fine") or r["inizio"])[:10] == fin]
         sovrapposte = [r for r in valide if str(r.get("inizio"))[:10] <= fin and str(r.get("fine") or r["inizio"])[:10] >= ini
                        and ((r.get("codice") and r.get("codice") == a.get("codice"))
@@ -468,7 +468,7 @@ def salva_assenze_argo(c, utente_id, dati):
                                                   q or 0, "registrata", (a.get("descrizione") or "")[:200],
                                                   a.get("particolarita") or "", rif_di(a)))
     for r in dati.get("richieste", []):
-        if r.get("stato") not in ARGO_IN_ATTESA or not r.get("inizio"):
+        if r.get("stato") not in ARGO_IN_ATTESA + ("NEW",) or not r.get("inizio"):
             continue
         try:
             if r.get("oraria"):
@@ -480,7 +480,8 @@ def salva_assenze_argo(c, utente_id, dati):
             q = 0
         c.execute("INSERT INTO assenze_argo (utente_id,tipo,inizio,fine,quantita,stato,descrizione,particolarita,rif)"
                   " VALUES (?,?,?,?,?,?,?,?,?)", (utente_id, tipo_da_argo(r), r["inizio"], r.get("fine") or r["inizio"],
-                                                  q, "richiesta", (r.get("descrizione") or "")[:200],
+                                                  q, "bozza" if r.get("stato") == "NEW" else "richiesta",
+                                                  (r.get("descrizione") or "")[:200],
                                                   r.get("particolarita") or "",
                                                   json.dumps(r["rif"] | {"stato": r.get("stato")}) if r.get("rif") else ""))
     c.execute("UPDATE utenti SET argo_letto=?, argo_errore='' WHERE id=?",
@@ -1407,12 +1408,25 @@ def api_annulla_assenza_segreteria(c, u, m, corpo, q, req):
     a = c.execute("SELECT * FROM assenze_argo WHERE id=? AND utente_id=?", (int(corpo.get("id") or 0), u["id"])).fetchone()
     if not a:
         raise Errore("Assenza non trovata: rientra con le credenziali Argo per aggiornare l'elenco.", 404)
+    rif = json.loads(a["rif"]) if a["rif"] else None
+    if rif and rif.get("stato") == "NEW":  # bozza mai inoltrata: si annulla subito, senza motivo, come in Argo Personale
+        s = SESSIONI_PERSONALE.get(req.token)
+        if not s or s.get("utente_id") != u["id"]:
+            raise Errore("Per annullare la bozza entra con le credenziali Argo "
+                         "(dopo un riavvio di SmartDesk serve un nuovo accesso).", 409)
+        try:
+            esito = argo.annulla_bozza_personale(s, rif)
+        except argo.ErroreArgo as e:
+            if "scaduta" in str(e):
+                SESSIONI_PERSONALE.pop(req.token, None)
+            raise Errore(str(e), 502)
+        c.execute("DELETE FROM assenze_argo WHERE id=?", (a["id"],))
+        return {"ok": True, "bozza": True, "messaggio": esito}
     motivo = str(corpo.get("nota") or "").strip()
     if not motivo:
         raise Errore("Scrivi il motivo dell'annullamento.")
     if len(motivo) > 250:
         raise Errore(f"Il motivo può avere al massimo 250 caratteri (ne hai scritti {len(motivo)}).")
-    rif = json.loads(a["rif"]) if a["rif"] else None
     if not rif:
         raise Errore("Questa assenza è stata inserita direttamente dalla segreteria, senza una tua richiesta: "
                      "nemmeno da Unica si può annullare. Chiedi alla segreteria di toglierla.")

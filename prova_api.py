@@ -187,7 +187,11 @@ def avvia_finto_argo():
                     {"uid": "R-FWD", "datInizio": lunedi, "datFine": lunedi, "codStato": "FWD", "codParticolarita": "MOTPERS",
                      "desDescrizione": "Permesso per motivi personali o familiari", "desOrariaGiorn": "G"},
                     {"datInizio": lunedi, "datFine": lunedi, "codStato": "NUL", "codParticolarita": "MOTPERS",
-                     "desDescrizione": "Permesso per motivi personali o familiari", "desOrariaGiorn": "G"}]}
+                     "desDescrizione": "Permesso per motivi personali o familiari", "desOrariaGiorn": "G"}]
+                    + ([] if "R-NEW" in srv.bozze_annullate else [
+                        {"uid": "R-NEW", "datInizio": f"{a0}-11-20", "datFine": f"{a0}-11-20", "codStato": "NEW",
+                         "codParticolarita": "MOTPERS", "desDescrizione": "Permesso per motivi personali o familiari",
+                         "desOrariaGiorn": "G"}])}
             return None
 
         def personale_ok(self):
@@ -198,9 +202,15 @@ def avvia_finto_argo():
             grezzo = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
             if self.path == "/personale/rest/richiestascodip/annulla/fwd" and self.personale_ok():
                 c = json.loads(grezzo)
+                if "prgReferente" in c:  # come Argo vero: campo sconosciuto -> 400
+                    return self.manda(400, json.dumps({"success": False, "msg": 'Unrecognized field "prgReferente"'}),
+                                      tipo="application/json")
                 if not c.get("desNoteAnnullamento") or len(c["desNoteAnnullamento"]) > 250 or c.get("uidAssenzaDef") != "A-1314":
                     return self.manda(200, json.dumps({"success": False, "msg": "Dati non validi"}), tipo="application/json")
                 srv.annullate[c["uid"]] = c["desNoteAnnullamento"]
+                return self.manda(200, json.dumps({"success": True, "msg": "Richiesta annullata"}), tipo="application/json")
+            if self.path.startswith("/personale/rest/richiestascodip/annulla/new/") and self.personale_ok() and not grezzo:
+                srv.bozze_annullate.append(self.path.rsplit("/", 1)[-1])
                 return self.manda(200, json.dumps({"success": True, "msg": "Richiesta annullata"}), tipo="application/json")
             return self.manda(401)
 
@@ -255,7 +265,7 @@ def avvia_finto_argo():
     argo.PERSONALE_API = base + "/personale/rest/"
     argo.DIDUP_API = base + "/wsxrest/api/rest/"
     srv.scaricati, srv.conferme = set(), {}
-    srv.annullate, srv.allegati_argo = {}, []
+    srv.annullate, srv.allegati_argo, srv.bozze_annullate = {}, [], []
     return srv
 
 
@@ -470,7 +480,8 @@ def main():
     ass = seg_.get("assenze", [])
     controlla(s == 200 and seg_.get("letto") and not seg_.get("errore"), "assenze lette dal programma della segreteria")
     controlla(sorted((x["tipo"], x["stato"], x["quantita"]) for x in ass)
-              == [("ferie", "registrata", 1), ("motivi_personali", "registrata", 2), ("motivi_personali", "richiesta", 1)],
+              == [("ferie", "registrata", 1), ("motivi_personali", "bozza", 1), ("motivi_personali", "registrata", 2),
+                  ("motivi_personali", "richiesta", 1)],
               f"assenze registrate e richiesta in attesa (le annullate no): {[(x['tipo'], x['stato']) for x in ass]}")
     mp = next(k for k in ct["contatori"] if k["tipo"] == "motivi_personali")
     controlla(mp["usati"] >= 2 and mp["attesa"] >= 1 and mp["residuo"] <= 0,
@@ -506,7 +517,13 @@ def main():
               "in SmartDesk restano motivo e allegato dell'annullamento")
     s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "di nuovo"})
     controlla(s == 400 and "già chiesto" in e["errore"], "non si chiede due volte")
+    bozza = next(x for x in ass if x["stato"] == "bozza")
+    controlla(bozza["annullabile"], "la bozza salvata su Argo si può annullare")
+    s, rb = g.chiama("/api/assenze-segreteria/annulla", {"id": bozza["id"]})
+    controlla(s == 200 and rb.get("bozza") and finto.bozze_annullate == ["R-NEW"],
+              f"bozza annullata su Argo senza motivo, come in Argo Personale ({rb})")
     ct2 = g.chiama("/api/contatori")[1]
+    controlla(not any(x["id"] == bozza["id"] for x in ct2["segreteria"]["assenze"]), "la bozza annullata sparisce dall'elenco")
     x2 = next(x for x in ct2["segreteria"]["assenze"] if x["id"] == mp_reg["id"])
     controlla(x2["richiesta"] and x2["richiesta"]["inviata"], "l'assenza mostra l'annullamento inviato")
     mp2 = next(k for k in ct2["contatori"] if k["tipo"] == "motivi_personali")

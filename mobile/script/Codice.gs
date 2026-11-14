@@ -332,13 +332,13 @@ function leggiPersonale(s) {
                      stato_nome: NOMI_STATO[r.codStato] || r.codStato || '', tipo: tipoDa(r.codParticolarita, r.desDescrizione),
                      descrizione: r.desDescrizione || '', oraria: orar, ora_dal: String(r.datPermOraDal || '').slice(-8, -3),
                      ora_al: String(r.datPermOraAl || '').slice(-8, -3),
-                     annullabile: !!r.uid && CHIUSE.indexOf(r.codStato) < 0 && r.codStato !== 'NEW' });
+                     annullabile: !!r.uid && CHIUSE.indexOf(r.codStato) < 0 });
   });
   var assenze = (reg.data || []).map(function (a) {
     var t = a.tipoAssenza || {}, orar = t.codOrariaGiorn === 'O';
     var ini = giorno(a.datInizio), fin = giorno(a.datFine || a.datInizio);
     // la richiesta da cui è nata: prima stesse date, poi stesso tipo con periodo che si sovrappone
-    var valide = richieste.filter(function (r) { return r.id && CHIUSE.indexOf(r.stato) < 0; });
+    var valide = richieste.filter(function (r) { return r.id && CHIUSE.indexOf(r.stato) < 0 && r.stato !== 'NEW'; });
     var tipo = tipoDa(t.codParticolarita, t.desDescrizione);
     var da = valide.filter(function (r) { return r.inizio === ini && r.fine === fin; })[0]
           || valide.filter(function (r) { return r.inizio <= fin && r.fine >= ini && r.tipo === tipo; })[0];
@@ -356,6 +356,11 @@ function azioneAnnulla(c) {
   var r = (s.rif || {})[c.richiesta];
   if (!r) throw new ErroreArgo('Richiesta non trovata: aggiorna i dati e riprova.', 404);
   if (CHIUSE.indexOf(r.stato) >= 0) throw new ErroreArgo('Questa richiesta è già annullata o chiusa.');
+  if (r.stato === 'NEW') {  // bozza mai inoltrata: come Argo Personale, si annulla subito e senza motivo
+    var e = chiama(PERSONALE_API + 'richiestascodip/annulla/new/' + encodeURIComponent(r.uid), null, hPersonale(s.personale), 'put');
+    if (e.success === false) throw new ErroreArgo('Il programma Personale non ha annullato la bozza' + (e.msg ? ': ' + e.msg : ''));
+    return { messaggio: e.msg || 'Bozza annullata', bozza: true, allegati_non_caricati: [], dati: leggiPersonale(s) };
+  }
   var motivo = String(c.motivo || '').trim();
   if (!motivo) throw new ErroreArgo("Scrivi il motivo dell'annullamento.");
   if (motivo.length > 250) throw new ErroreArgo('Il motivo può avere al massimo 250 caratteri.');

@@ -432,19 +432,32 @@ function assenzeSoloSegreteria(assenze, richieste) {
 function elemAssenzaSegreteria(x) {
   const q = `${num(x.quantita)} ${x.unita === 'ore' ? 'ore' : x.quantita === 1 ? 'giorno' : 'giorni'}`;
   const r = x.richiesta;
-  const bottone = testo => `<button class="btn mini pericolo" data-annulla-seg="${x.id}" data-cosa="${esc((x.descrizione || 'Assenza') + ' del ' + fd(x.inizio))}">${testo}</button>`;
+  const bottone = testo => `<button class="btn mini pericolo" data-annulla-seg="${x.id}"${x.stato === 'bozza' ? ' data-bozza="1"' : ''} data-cosa="${esc((x.descrizione || 'Assenza') + ' del ' + fd(x.inizio))}">${testo}</button>`;
   const inviata = r && r.inviata && ['annullamento', 'annullata'].includes(r.stato);
   const destra = inviata ? `<a class="chip annullamento" href="#/richiesta/${r.id}">Annullamento inviato</a>`
-    : x.annullabile ? bottone(r ? 'Invia l\'annullamento ad Argo' : 'Chiedi l\'annullamento')
+    : x.annullabile ? bottone(x.stato === 'bozza' ? 'Annulla la bozza' : r ? 'Invia l\'annullamento ad Argo' : 'Chiedi l\'annullamento')
     : x.stato === 'registrata' ? '<span class="chip" title="Inserita dalla segreteria senza una tua richiesta: chiedi alla segreteria">Inserita dalla segreteria</span>'
     : '<span class="chip">In attesa</span>';
   return `<div class="elem"><span class="ico">${ico('richieste')}</span><span class="testo"><b>${esc(x.descrizione || 'Assenza')}</b>
-    <span>${fd(x.inizio)}${x.fine !== x.inizio ? ' – ' + fd(x.fine) : ''} · ${q} · registrata dalla segreteria</span></span>
+    <span>${fd(x.inizio)}${x.fine !== x.inizio ? ' – ' + fd(x.fine) : ''} · ${q} · ${x.stato === 'bozza' ? 'bozza su Argo, non inviata' : 'registrata dalla segreteria'}</span></span>
     <span class="destra">${destra}</span></div>`;
 }
 
 function collegaAnnullaSegreteria(c) {
   $$('[data-annulla-seg]', c).forEach(b => b.onclick = () => {
+    if (b.dataset.bozza) {  // bozza mai inoltrata: come in Argo Personale si annulla subito, senza motivo
+      const f = finestra(`<h2>Annulla la bozza</h2>
+        <p class="muted">${esc(b.dataset.cosa)}. È una bozza salvata su Argo e mai inviata: la segreteria non l'ha vista, quindi non serve il motivo.</p>
+        <div class="piede"><button class="btn" data-chiudi>Indietro</button><button class="btn pericolo" id="an-ok">Annulla la bozza</button></div>`);
+      $('#an-ok', f.el).onclick = async e => {
+        e.target.disabled = true; e.target.textContent = 'Invio…';
+        try {
+          await api('/api/assenze-segreteria/annulla', { id: +b.dataset.annullaSeg });
+          f.chiudi(); toast('Bozza annullata.'); naviga();
+        } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Annulla la bozza'; }
+      };
+      return;
+    }
     const f = finestra(`<h2>Chiedi l'annullamento</h2>
       <p class="muted">${esc(b.dataset.cosa)}. Come in Unica, l'annullamento arriva alla segreteria con il motivo e gli allegati; quando lo registra, i giorni tornano disponibili.</p>
       <label class="campo"><span>Motivo dell'annullamento <small class="muted" id="an-conta">0/250</small></span><textarea id="an-nota" maxlength="250"></textarea></label>
