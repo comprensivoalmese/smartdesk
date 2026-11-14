@@ -37,7 +37,7 @@ documenti personali, gestione). Creata il 14/11/2026 per Andrea Giorda. Si lavor
   `utilizzo()` le conta per prime e aggiunge le richieste dello Sportello solo se non si sovrappongono. Se la lettura
   fallisce l'accesso vale lo stesso (`utenti.argo_errore`, mostrato in Situazione). Endpoint verificati dal browser
   sulla pagina vera; il passaggio `login` è ricavato dal codice di argopersonale (app.js V.1.50.2).- Annullamenti (14/11): `POST /api/assenze-segreteria/annulla` manda l'annullamento al programma Personale come Unica:
-  PUT `richiestascodip/annulla/fwd` {uid, desNote, uidAssenzaDef, desNoteAnnullamento (max 250)} (MAI prgReferente: Argo risponde 400 "Unrecognized field"), poi gli
+  PUT `richiestascodip/annulla/fwd` {uid, desNote, uidAssenzaDef, desNoteAnnullamento (max 250)} (MAI prgReferente: Argo risponde 400 "Unrecognized field"). Bozze (NEW, mai inoltrate): PUT `richiestascodip/annulla/new/<uid>` senza corpo e senza motivo; in assenze_argo hanno stato "bozza" e non contano nei contatori, poi gli
   allegati con POST multipart `richiestasco/uploadallegato?uidRichiesta=..&autore=DIP` (header X-File-Name base64,
   X-Filename-Encoder, X-File-Size, X-File-Type). Ricavato da argopersonale app.js, provato solo col finto Argo.
   L'assenza registrata si collega alla richiesta con le stesse date (`assenze_argo.rif`); senza richiesta (inserita
@@ -55,4 +55,4 @@ documenti personali, gestione). Creata il 14/11/2026 per Andrea Giorda. Si lavor
   browser integrato: `fetch` da `/servizio/Codice.gs.txt` su Pages e `monaco.editor.getModels()[0].setValue`; localhost
   e appunti non funzionano), salvare, Gestisci deployment > modifica > Nuova versione (l'URL /exec resta lo stesso).
 - Password mai salvata; sessione in CacheService 6 h; solo utenti .SC15290; 3 errori = 15 min di attesa.
-- Collaudato dall'utente il 14/11: accesso vero OK e annullamento di una richiesta riuscito (stato "Annullata" in Argo), servizio versione 3.
+- Collaudato dall'utente il 14/11: accesso vero OK e annullamento di una richiesta riuscito (stato "Annullata" in Argo). Servizio versione 4 (14/11 18:58, con annullamento bozze, non ancora provato su una bozza vera).
