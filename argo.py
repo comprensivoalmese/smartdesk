@@ -55,15 +55,20 @@ def _segui(op, url, dati=None, ritorno=None):
     altrimenti ("pagina", html)."""
     base_ritorno = (ritorno or RITORNO).split("?")[0]
     for _ in range(15):
+        op.ultimo_url = url.split("?")[0]
         stato, intest, corpo = _apri(op, url, dati)
         if stato not in (301, 302, 303, 307, 308):
             return "pagina", corpo
         url = urllib.parse.urljoin(url, intest.get("Location", ""))
         dati = None
         if url.startswith(base_ritorno):
-            codice = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("code", [None])[0]
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            codice = q.get("code", [None])[0]
             if codice:
                 return "codice", codice
+            if q.get("error"):
+                raise ErroreArgo("Argo ha rifiutato l'accesso: " + q["error"][0][:60]
+                                 + (" – " + q["error_description"][0][:160] if q.get("error_description") else ""))
     raise ErroreArgo("Troppi reindirizzamenti durante l'accesso ad Argo.")
 
 
@@ -91,6 +96,15 @@ def _motivo(html):
     if 'id="loginForm"' in html:
         return "Nome utente o password di Argo non corretti."
     return "Argo ha risposto in modo inatteso."
+
+
+def _descrivi_pagina(op, html):
+    """Per la diagnosi: indirizzo (senza parametri), titolo e moduli della pagina. Nessun dato personale."""
+    titolo = re.search(r"<title[^>]*>(.*?)</title>", html or "", re.S | re.I)
+    moduli = re.findall(r'<form\b[^>]*id="([^"]+)"', html or "")
+    return (f"pagina {getattr(op, 'ultimo_url', '?')}"
+            + (f", titolo «{unescape(titolo.group(1)).strip()[:60]}»" if titolo else "")
+            + (f", moduli {', '.join(moduli[:5])}" if moduli else ", nessun modulo"))
 
 
 def _jwt(token):
@@ -134,6 +148,10 @@ def accedi(utente, password, assenze=False):
         raise ErroreArgo("Argo ha risposto in modo inatteso.")
     campi = _campi_modulo(pagina, "loginForm")
     campi.update(username=utente, password=password, login="true")
+    if assenze and "remember_me" in campi:
+        # "Ricordami" vale solo per questa sessione temporanea del server (cookie in memoria, poi buttati):
+        # serve perché il programma Personale riconosca l'accesso senza chiedere di nuovo la password
+        campi["remember_me"] = "true"
     tipo, valore = _segui(op, PORTALE + "/auth/sso/login", campi)
     if tipo != "codice":
         raise ErroreArgo(_motivo(valore))
@@ -189,7 +207,8 @@ def leggi_personale(op, utente, password):
         campi.update(username=utente, password=password, login="true")
         tipo, valore = _segui(op, PORTALE + "/auth/sso/login", campi, ritorno=PERSONALE_RITORNO)
     if tipo != "codice":
-        raise ErroreArgo("accesso al programma Personale non riuscito: " + _motivo(valore))
+        raise ErroreArgo("accesso al programma Personale non riuscito: " + _motivo(valore).rstrip(".")
+                         + " (" + _descrivi_pagina(op, valore) + ")")
     token = _gettone(op, PERSONALE_CLIENT, PERSONALE_RITORNO, valore, verificatore)["access_token"]
     sessione = _json(PERSONALE_API + "login", intestazioni={"Authorization": "Bearer " + token, "appCode": "WWP"})
     if not sessione.get("uid") or not sessione.get("uidSubAnagrafe"):

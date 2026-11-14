@@ -85,7 +85,7 @@ def avvia_finto_argo():
 
         def modulo(self):
             return ('<html><form id="loginForm" action="/auth/sso/login" method="post">'
-                    '<input type="hidden" name="challenge" value="abc&amp;1"><input name="username">'
+                    '<input type="hidden" name="challenge" value="abc&amp;1"><input type="hidden" name="remember_me" value="false"><input name="username">'
                     '<input type="password" name="password"><button name="login" value="true">Entra</button></form></html>')
 
         def do_GET(self):
@@ -102,8 +102,10 @@ def avvia_finto_argo():
             if u.path == "/login":
                 return self.manda(200, self.modulo())
             if u.path == "/consenso-ok":
-                un = parse_qs(u.query)["u"][0]
-                return self.manda(302, loc=argo.RITORNO + "&code=COD-" + un, biscotto="sso=" + un)
+                q = parse_qs(u.query)
+                un = q["u"][0]  # come Argo: la sessione resta solo con "Ricordami"
+                return self.manda(302, loc=argo.RITORNO + "&code=COD-" + un,
+                                  biscotto=("sso=" + un) if q.get("r") == ["true"] else None)
             self.manda(404)
 
         def personale(self, grezzo):
@@ -150,7 +152,7 @@ def avvia_finto_argo():
                 if un == "con.otp":
                     return self.manda(200, '<form id="otpForm"></form>')
                 if un in persone and v["password"] == "giusta":
-                    return self.manda(302, loc=f"/consenso-ok?u={un}")
+                    return self.manda(302, loc=f"/consenso-ok?u={un}&r={v.get('remember_me')}")
                 return self.manda(200, self.modulo())
             if self.path == "/oauth2/token":
                 if v.get("grant_type") != "authorization_code" or not v.get("code_verifier"):
