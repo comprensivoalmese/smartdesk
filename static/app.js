@@ -403,16 +403,62 @@ async function vistaHome(c) {
   BADGE.bacheca = d.n_da_leggere; BADGE.gestione = d.da_lavorare || 0; BADGE.richieste = d.da_integrare; disegnaBadge();
 }
 
+// stati delle richieste: in corso, concesse (giorni usati, si possono far annullare), chiuse
+const IN_CORSO = ['inviata', 'verificata', 'da_integrare', 'annullamento'];
+const CONCESSE = ['autorizzata', 'registrata', 'annullamento'];
+
+// assenze registrate dalla segreteria che non corrispondono già a una richiesta fatta qui
+function assenzeSoloSegreteria(assenze, richieste) {
+  return assenze.filter(x => x.stato === 'registrata' && !x.richiesta && !richieste.some(r =>
+    r.tipo === x.tipo && CONCESSE.concat('evasa').includes(r.stato) && r.dal && r.dal <= x.fine && (r.al || r.dal) >= x.inizio));
+}
+
+function elemAssenzaSegreteria(x) {
+  const q = `${num(x.quantita)} ${x.unita === 'ore' ? 'ore' : x.quantita === 1 ? 'giorno' : 'giorni'}`;
+  const r = x.richiesta;
+  const destra = r && r.stato === 'annullamento' ? `<a class="chip annullamento" href="#/richiesta/${r.id}">Annullamento richiesto</a>`
+    : r && r.stato === 'annullata' ? `<a class="chip letta" href="#/richiesta/${r.id}">Annullata: da togliere in segreteria</a>`
+    : x.stato === 'registrata' ? `<button class="btn mini pericolo" data-annulla-seg="${x.id}" data-cosa="${esc((x.descrizione || 'Assenza') + ' del ' + fd(x.inizio))}">Chiedi l'annullamento</button>`
+    : '<span class="chip">In attesa</span>';
+  return `<div class="elem"><span class="ico">${ico('richieste')}</span><span class="testo"><b>${esc(x.descrizione || 'Assenza')}</b>
+    <span>${fd(x.inizio)}${x.fine !== x.inizio ? ' – ' + fd(x.fine) : ''} · ${q} · registrata dalla segreteria</span></span>
+    <span class="destra">${destra}</span></div>`;
+}
+
+function collegaAnnullaSegreteria(c) {
+  $$('[data-annulla-seg]', c).forEach(b => b.onclick = async () => {
+    const ris = await chiedi({
+      titolo: "Chiedi l'annullamento", nota: true, notaObbligatoria: true, bottone: "Chiedi l'annullamento", pericolo: true,
+      testo: `${b.dataset.cosa}. La richiesta va alla segreteria: quando la conferma, i giorni tornano disponibili.`,
+    });
+    if (!ris) return;
+    try {
+      const r = await api('/api/assenze-segreteria/annulla', { id: +b.dataset.annullaSeg, nota: ris.nota });
+      toast('Richiesta di annullamento inviata alla segreteria.');
+      location.hash = '#/richiesta/' + r.id;
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
 async function vistaRichieste(c, m, q) {
-  const tutte = await api('/api/richieste');
+  const [tutte, cont] = await Promise.all([api('/api/richieste'), api('/api/contatori')]);
   const filtro = q.filtro || 'corso';
-  const corso = ['inviata', 'verificata', 'da_integrare'];
-  const el = tutte.filter(r => filtro === 'tutte' || (filtro === 'corso' ? corso.includes(r.stato) : !corso.includes(r.stato)));
+  const segreteria = assenzeSoloSegreteria(cont.segreteria.assenze, tutte);
+  const el = tutte.filter(r => filtro === 'tutte' || (filtro === 'corso' ? IN_CORSO.includes(r.stato)
+    : filtro === 'usufruite' ? CONCESSE.includes(r.stato) : !IN_CORSO.includes(r.stato) && !CONCESSE.includes(r.stato)));
+  // nelle usufruite: prima le più recenti, insieme a quelle registrate dalla segreteria
+  const voci = filtro !== 'usufruite' ? el.map(r => ({ html: elemRichiesta(r) }))
+    : el.map(r => ({ d: r.dal || '', html: elemRichiesta(r) })).concat(segreteria.map(x => ({ d: x.inizio, html: elemAssenzaSegreteria(x) })))
+      .sort((a, b) => b.d.localeCompare(a.d));
+  const nCorso = tutte.filter(r => IN_CORSO.includes(r.stato)).length;
   c.innerHTML = `
     <div class="riga" style="margin-bottom:16px"><h1 style="margin:0">Le mie richieste</h1><span class="spazio"></span><a class="btn primario" href="#/nuova">${ico('piu')} Nuova richiesta</a></div>
-    <div class="filtri">${[['corso', 'In corso'], ['concluse', 'Concluse'], ['tutte', 'Tutte']].map(([k, n]) =>
+    <div class="filtri">${[['corso', 'In corso' + (nCorso ? ` (${nCorso})` : '')], ['usufruite', 'Concesse e usufruite'], ['concluse', 'Chiuse'], ['tutte', 'Tutte']].map(([k, n]) =>
       `<a class="pillola ${filtro === k ? 'attiva' : ''}" href="#/richieste?filtro=${k}" style="text-decoration:none;color:inherit">${n}</a>`).join('')}</div>
-    <div class="lista">${el.length ? el.map(r => elemRichiesta(r)).join('') : `<div class="card vuoto">Nessuna richiesta ${filtro === 'corso' ? 'in corso' : ''}.<br><br><a class="btn primario" href="#/nuova">Fai una richiesta</a></div>`}</div>`;
+    ${filtro === 'usufruite' ? `<p class="muted piccolo">Apri una richiesta per chiederne l'annullamento: la segreteria lo conferma e i giorni tornano disponibili.${segreteria.length ? ' Le assenze registrate direttamente dalla segreteria hanno il pulsante qui accanto.' : ''}</p>` : ''}
+    ${filtro === 'corso' && nCorso ? '<p class="muted piccolo">Per ritirare una richiesta in corso aprila e tocca «Annulla la richiesta».</p>' : ''}
+    <div class="lista">${voci.length ? voci.map(v => v.html).join('') : `<div class="card vuoto">Nessuna richiesta ${filtro === 'corso' ? 'in corso' : filtro === 'usufruite' ? 'concessa' : ''}.<br><br><a class="btn primario" href="#/nuova">Fai una richiesta</a></div>`}</div>`;
+  collegaAnnullaSegreteria(c);
 }
 
 async function vistaNuova(c, m) {
@@ -517,7 +563,11 @@ async function formRichiesta(c, t, r) {
 }
 
 const NOMI_STORICO = { inviata: 'Inviata', verificata: 'Verificata dalla segreteria', da_integrare: 'Richiesta integrazione', autorizzata: 'Autorizzata',
-  respinta: 'Respinta', registrata: 'Registrata', evasa: 'Evasa', annullata: 'Annullata', revocata: 'Revocata', reinviata: 'Integrata e reinviata', allegato: 'Allegato aggiunto' };
+  respinta: 'Respinta', registrata: 'Registrata', evasa: 'Evasa', annullata: 'Annullata', revocata: 'Revocata', reinviata: 'Integrata e reinviata', allegato: 'Allegato aggiunto',
+  chiedi_annullamento: 'Chiesto l\'annullamento', ritira_annullamento: 'Ritirata la richiesta di annullamento',
+  conferma_annullamento: 'Annullamento confermato: giorni restituiti', nega_annullamento: 'Annullamento non accolto' };
+const AZ_PERICOLO = ['respingi', 'annulla', 'revoca', 'chiedi_annullamento', 'nega_annullamento'];
+const AZ_OK = ['autorizza', 'registra', 'evadi', 'conferma_annullamento'];
 
 async function vistaRichiesta(c, m) {
   const r = await api('/api/richieste/' + m[1]);
@@ -528,8 +578,9 @@ async function vistaRichiesta(c, m) {
   if (!mia) dati.push(['Dipendente', `${r.richiedente} (${r.richiedente_ruolo})`]);
   if (r.dal) dati.push([t.unita === 'ore' ? 'Quando' : 'Periodo', periodo(r)], ['Durata', quantita(r)]);
   t.campi.forEach(f => { if (r.campi[f.id]) dati.push([f.etichetta, f.tipo === 'date' ? fd(r.campi[f.id], false) : r.campi[f.id]]); });
+  if (r.campi.origine === 'segreteria') dati.push(['Assenza', r.campi.assenza + ' (registrata dalla segreteria)']);
   if (r.note) dati.push(['Note', r.note]);
-  dati.push(['Inviata', fdt(r.creata)]);
+  dati.push([r.campi.origine === 'segreteria' ? 'Annullamento chiesto' : 'Inviata', fdt(r.creata)]);
   const puoAllegare = (mia || IO.staff) && !['annullata'].includes(r.stato);
   const mancaAttestato = mia && r.allegato_richiesto === 'dopo' && !r.allegati.length && !['annullata', 'respinta'].includes(r.stato);
   c.innerHTML = `
@@ -547,7 +598,7 @@ async function vistaRichiesta(c, m) {
         <div style="margin-top:10px">${r.allegati.length ? r.allegati.map(a => `<a class="allegato" href="/api/allegati/${a.id}" target="_blank" rel="noopener">${ico('documenti')} ${esc(a.nome)}</a>`).join('') : '<span class="muted">Nessun allegato</span>'}</div>
       </div>
       ${r.azioni.length ? `<div class="card"><h2>Azioni</h2><div class="riga">${r.azioni.map(a =>
-        `<button class="btn ${a.id === 'autorizza' || a.id === 'registra' || a.id === 'evadi' ? 'ok' : a.id === 'verifica' || a.id === 'modifica' ? 'primario' : ['respingi', 'annulla', 'revoca'].includes(a.id) ? 'pericolo' : ''}" data-az="${a.id}" data-nota="${a.nota ? 1 : 0}">${esc(a.nome)}</button>`).join('')}</div></div>` : ''}
+        `<button class="btn ${AZ_OK.includes(a.id) ? 'ok' : a.id === 'verifica' || a.id === 'modifica' ? 'primario' : AZ_PERICOLO.includes(a.id) ? 'pericolo' : ''}" data-az="${a.id}" data-nota="${a.nota ? 1 : 0}">${esc(a.nome)}</button>`).join('')}</div></div>` : ''}
     </div>
     <div class="card"><h2>Cronologia</h2><ol class="storia">${r.storico.map(s => `<li><b>${esc(NOMI_STORICO[s.azione] || s.azione)}</b>
       <small>${fdt(s.quando)}${s.chi ? ' · ' + esc(s.chi) : ''}</small>${s.nota ? `<div class="nota">${esc(s.nota)}</div>` : ''}</li>`).join('')}</ol></div>
@@ -565,9 +616,13 @@ async function vistaRichiesta(c, m) {
     if (az === 'modifica') { location.hash = '#/modifica/' + r.id; return; }
     const nomeAz = r.azioni.find(a => a.id === az).nome;
     const ris = await chiedi({
-      titolo: nomeAz, nota: az !== 'annulla', notaObbligatoria: b.dataset.nota === '1',
-      testo: az === 'annulla' ? 'La richiesta verrà ritirata. Potrai farne una nuova.' : az === 'integra' ? 'Spiega che cosa manca: il dipendente riceverà una notifica e potrà modificare la richiesta.' : `${r.richiedente} – ${r.tipo_nome}, ${periodo(r)}`,
-      bottone: nomeAz, pericolo: ['respingi', 'annulla', 'revoca'].includes(az),
+      titolo: nomeAz, nota: !['annulla', 'ritira_annullamento'].includes(az), notaObbligatoria: b.dataset.nota === '1',
+      testo: az === 'annulla' ? 'La richiesta verrà ritirata. Potrai farne una nuova.'
+        : az === 'chiedi_annullamento' ? 'Scrivi il motivo. La richiesta va alla segreteria: quando conferma, i giorni tornano disponibili.'
+        : az === 'ritira_annullamento' ? 'La richiesta resta valida com\'era prima.'
+        : az === 'conferma_annullamento' ? `${r.richiedente} – ${r.tipo_nome}, ${periodo(r)}. I giorni tornano disponibili.${r.campi.origine === 'segreteria' ? ' Ricordati di togliere l\'assenza anche dal programma della segreteria.' : ''}`
+        : az === 'integra' ? 'Spiega che cosa manca: il dipendente riceverà una notifica e potrà modificare la richiesta.' : `${r.richiedente} – ${r.tipo_nome}, ${periodo(r)}`,
+      bottone: nomeAz, pericolo: AZ_PERICOLO.includes(az),
     });
     if (!ris) return;
     try {
@@ -595,9 +650,8 @@ async function vistaSituazione(c, m, q) {
     ${notaSegreteria(d.segreteria, altro)}
     <div class="due">${d.contatori.map(barraContatore).join('')}</div>
     ${d.segreteria.assenze.length ? `<h2 style="margin-top:24px">Registrate dalla segreteria</h2>
-      <div class="card lista">${d.segreteria.assenze.map(x => `<div class="elem"><span class="testo"><b>${esc(x.descrizione || 'Assenza')}</b>
-        <span>${fd(x.inizio)}${x.fine !== x.inizio ? ' – ' + fd(x.fine) : ''} · ${num(x.quantita)} ${x.unita === 'ore' ? 'ore' : x.quantita === 1 ? 'giorno' : 'giorni'}</span></span>
-        <span class="destra"><span class="chip ${x.stato === 'registrata' ? 'letta' : ''}">${x.stato === 'registrata' ? 'Registrata' : 'In attesa'}</span></span></div>`).join('')}</div>` : ''}`;
+      <div class="card lista">${d.segreteria.assenze.map(x => altro ? elemAssenzaSegreteria({ ...x, stato: x.stato === 'registrata' ? 'vista' : x.stato }).replace('<span class="chip">In attesa</span>', '') : elemAssenzaSegreteria(x)).join('')}</div>` : ''}`;
+  collegaAnnullaSegreteria(c);
   // .card + .card aggiunge margine verticale nelle colonne: lo togliamo nella griglia
   $$('.due > .card', c).forEach(x => x.style.marginTop = '0');
 }

@@ -44,6 +44,8 @@ RUOLI = {
 STAFF = {"segreteria", "dsga", "dirigente"}
 ATTIVE = ("inviata", "verificata", "da_integrare")
 CONCLUSE_OK = ("autorizzata", "registrata", "evasa")
+# giorni già concessi: contano come usati anche mentre si aspetta la conferma dell'annullamento
+USATE = CONCLUSE_OK + ("annullamento",)
 
 STATI = {
     "inviata": "Inviata",
@@ -55,6 +57,7 @@ STATI = {
     "respinta": "Respinta",
     "annullata": "Annullata",
     "revocata": "Revocata",
+    "annullamento": "Annullamento richiesto",
 }
 
 AZIONI = {
@@ -67,8 +70,12 @@ AZIONI = {
     "revoca": "Revoca",
     "annulla": "Annulla la richiesta",
     "modifica": "Modifica e reinvia",
+    "chiedi_annullamento": "Chiedi l'annullamento",
+    "ritira_annullamento": "Ritira la richiesta di annullamento",
+    "conferma_annullamento": "Conferma l'annullamento",
+    "nega_annullamento": "Non annullare",
 }
-AZIONI_CON_NOTA = {"integra", "respingi", "revoca"}
+AZIONI_CON_NOTA = {"integra", "respingi", "revoca", "chiedi_annullamento", "nega_annullamento"}
 
 # ---------------------------------------------------------------- tipologie
 TIPOLOGIE = [
@@ -399,7 +406,7 @@ def utilizzo(c, utente_id, tipo, da, a, escludi=None):
 
     usati = sum(x["quantita"] for x in esterne if x["stato"] == "registrata")
     attesa = sum(x["quantita"] for x in esterne if x["stato"] == "richiesta")
-    usati += sum(r["quantita"] for r in righe if r["stato"] in CONCLUSE_OK and not gia_in_argo(r))
+    usati += sum(r["quantita"] for r in righe if r["stato"] in USATE and not gia_in_argo(r))
     attesa += sum(r["quantita"] for r in righe if r["stato"] in ATTIVE and not gia_in_argo(r))
     return usati, attesa
 
@@ -583,7 +590,8 @@ def valida_richiesta(c, u, corpo, escludi=None):
             raise Errore(f"Limite di {t['max_mese']} giorni al mese: ne restano {fmt(t['max_mese'] - us - at)}.")
     # sovrapposizioni
     for r in c.execute("SELECT * FROM richieste WHERE utente_id=? AND dal IS NOT NULL AND dal<=? AND al>=? "
-                       "AND id IS NOT ? AND stato IN ('inviata','verificata','da_integrare','autorizzata','registrata')",
+                       "AND id IS NOT ? AND stato IN ('inviata','verificata','da_integrare','autorizzata','registrata',"
+                       "'annullamento')",
                        (u["id"], v["al"], v["dal"], escludi)):
         if t["unita"] == "ore" and r["ora_da"]:
             if ora_min(r["ora_da"]) < ora_min(v["ora_a"]) and ora_min(r["ora_a"]) > ora_min(v["ora_da"]):
@@ -620,8 +628,14 @@ def azioni_possibili(u, r, richiedente):
         az.append("annulla")
     if mia and s == "da_integrare":
         az.append("modifica")
+    if mia and s in ("autorizzata", "registrata") and t["unita"] != "nessuna":
+        az.append("chiedi_annullamento")
+    if mia and s == "annullamento":
+        az.append("ritira_annullamento")
     if u["ruolo"] in STAFF and (not mia or u["ruolo"] == "dirigente"):
-        if t.get("comunicazione"):
+        if s == "annullamento":
+            az += ["conferma_annullamento", "nega_annullamento"]
+        elif t.get("comunicazione"):
             if s == "inviata":
                 az += ["registra", "integra"]
         elif t["id"] == "generica":
@@ -678,7 +692,7 @@ def cartellino(c, u, anno, mese):
     timb = c.execute("SELECT * FROM timbrature WHERE utente_id=? AND quando>=? AND quando<? ORDER BY quando",
                      (u["id"], m0.isoformat(), m1.isoformat())).fetchall()
     assenze = c.execute("SELECT * FROM richieste WHERE utente_id=? AND dal<? AND al>=? AND stato IN "
-                        "('autorizzata','registrata','inviata','verificata')",
+                        "('autorizzata','registrata','inviata','verificata','annullamento')",
                         (u["id"], m1.isoformat(), m0.isoformat())).fetchall()
     giorni, tot_lav, tot_teo = [], 0.0, 0.0
     d = m0
@@ -696,7 +710,7 @@ def cartellino(c, u, anno, mese):
         ass = [a for a in assenze if a["dal"] <= iso <= a["al"]]
         ass_giorno = [a for a in ass if TIPI[a["tipo"]]["unita"] == "giorni"]
         ass_ore = sum(a["quantita"] for a in ass if TIPI[a["tipo"]]["unita"] == "ore"
-                      and a["stato"] in CONCLUSE_OK)
+                      and a["stato"] in USATE)
         lav = lavorativo(d, imp)
         teorico = u["ore_giornaliere"] if lav and not ass_giorno else 0
         passato = d < oggi() or (d == oggi() and lavorato > 0)
@@ -1011,14 +1025,22 @@ def sessione_didup(req, u):
     return s
 
 
+def chiave_didup(pk):
+    """I codici dei messaggi DidUP sono lunghe stringhe esadecimali (non numeri): li usiamo come testo."""
+    k = str(pk)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,300}", k):
+        raise Errore("Messaggio non trovato.", 404)
+    return k
+
+
 def cartella_didup(utente_id, pk):
-    return os.path.join(DATI, "didup-allegati", str(int(utente_id)), str(int(pk)))
+    return os.path.join(DATI, "didup-allegati", str(int(utente_id)), chiave_didup(pk)[:120])
 
 
 def allegati_didup(utente_id, pk):
     d = cartella_didup(utente_id, pk)
     nomi = sorted(os.listdir(d)) if os.path.isdir(d) else []
-    return [{"nome": n, "url": f"/api/didup/allegato/{int(pk)}/{i}"} for i, n in enumerate(nomi)]
+    return [{"nome": n, "url": f"/api/didup/allegato/{chiave_didup(pk)}/{i}"} for i, n in enumerate(nomi)]
 
 
 def messaggio_didup(x, utente_id):
@@ -1049,7 +1071,7 @@ def api_didup_bacheca(c, u, m, corpo, q, req):
         if "scaduta" in str(e):
             SESSIONI_DIDUP.pop(req.token, None)
         return {"collegata": False, "motivo": str(e)}
-    s["ultimo_elenco"] = {x.get("pk"): x for x in elenco if x.get("pk") is not None}
+    s["ultimo_elenco"] = {str(x.get("pk")): x for x in elenco if x.get("pk") is not None}
     msg = [messaggio_didup(x, u["id"]) for x in elenco if x.get("pk") is not None]
     da_fare = [x for x in msg if (x["pv_richiesta"] and not x["pv_fatta"]) or (x["ad_richiesta"] and not x["ad_fatta"])]
     altri = sorted([x for x in msg if x not in da_fare], key=lambda x: x["data"], reverse=True)
@@ -1057,14 +1079,14 @@ def api_didup_bacheca(c, u, m, corpo, q, req):
     return {"collegata": True, "messaggi": da_fare + altri, "da_fare": len(da_fare), "adesioni": ADESIONI}
 
 
-@rotta("POST", r"/api/didup/bacheca/(\d+)/conferma")
+@rotta("POST", r"/api/didup/bacheca/([A-Za-z0-9_-]+)/conferma")
 def api_didup_conferma(c, u, m, corpo, q, req):
     s = sessione_didup(req, u)
-    pk = int(m.group(1))
+    pk = chiave_didup(m.group(1))
     x = (s.get("ultimo_elenco") or {}).get(pk)
     try:
         if x is None:
-            x = next((y for y in argo.bacheca_didup(s) if y.get("pk") == pk), None)
+            x = next((y for y in argo.bacheca_didup(s) if str(y.get("pk")) == pk), None)
         if x is None:
             raise Errore("Messaggio non trovato nella bacheca DidUP.", 404)
         adesione = corpo.get("adesione") or None
@@ -1096,13 +1118,13 @@ def api_didup_conferma(c, u, m, corpo, q, req):
     return {"ok": True, "messaggio": messaggio_didup(x, u["id"]), "scaricati": len(file)}
 
 
-@rotta("GET", r"/api/didup/allegato/(\d+)/(\d+)")
+@rotta("GET", r"/api/didup/allegato/([A-Za-z0-9_-]+)/(\d+)")
 def api_didup_allegato(c, u, m, corpo, q, req):
-    el = allegati_didup(u["id"], int(m.group(1)))
+    el = allegati_didup(u["id"], m.group(1))
     i = int(m.group(2))
     if i >= len(el):
         raise Errore("Allegato non trovato.", 404)
-    percorso = os.path.join(cartella_didup(u["id"], int(m.group(1))), el[i]["nome"])
+    percorso = os.path.join(cartella_didup(u["id"], m.group(1)), el[i]["nome"])
     with open(percorso, "rb") as f:
         dati = f.read()
     return file_da_scaricare(dati, el[i]["nome"], mimetypes.guess_type(el[i]["nome"])[0] or "application/octet-stream")
@@ -1174,10 +1196,15 @@ def api_contatori(c, u, m, corpo, q, req):
         target = c.execute("SELECT * FROM utenti WHERE id=?", (int(q["utente"]),)).fetchone() or u
     da, a = inizio_anno(), fine_anno(oggi())
     esterne = [dict(x) for x in c.execute(
-        "SELECT tipo, inizio, fine, quantita, stato, descrizione FROM assenze_argo WHERE utente_id=? AND inizio>=?"
+        "SELECT id, tipo, inizio, fine, quantita, stato, descrizione FROM assenze_argo WHERE utente_id=? AND inizio>=?"
         " AND inizio<=? ORDER BY inizio DESC", (target["id"], da.isoformat(), a.isoformat()))]
     for x in esterne:
         x["unita"] = TIPI[x["tipo"]]["unita"] if x["tipo"] in TIPI else "giorni"
+        rich = c.execute("SELECT id, stato FROM richieste WHERE utente_id=? AND tipo=? AND dal=? AND al=? AND "
+                         "campi LIKE '%\"origine\": \"segreteria\"%' ORDER BY id DESC",
+                         (target["id"], x["tipo"] if x["tipo"] in TIPI else "generica", x["inizio"],
+                          x["fine"])).fetchone()
+        x["richiesta"] = dict(rich) if rich else None
     return {"utente": utente_pubblico(target), "anno": nome_anno(), "contatori": contatori(c, target),
             "segreteria": {"letto": target["argo_letto"] or "", "errore": target["argo_errore"] or "",
                            "assenze": esterne}}
@@ -1278,13 +1305,27 @@ def api_azione(c, u, m, corpo, q, req):
         raise Errore("Scrivi una motivazione.")
     nuovo = {"verifica": "verificata", "integra": "da_integrare", "autorizza": "autorizzata",
              "respingi": "respinta", "registra": "registrata", "evadi": "evasa", "revoca": "revocata",
-             "annulla": "annullata"}[az]
+             "annulla": "annullata", "chiedi_annullamento": "annullamento", "conferma_annullamento": "annullata",
+             "ritira_annullamento": None, "nega_annullamento": None}[az]
+    if nuovo is None:  # si torna allo stato di prima della richiesta di annullamento
+        nuovo = stato_prima_annullamento(c, r)
     ora = adesso().isoformat()
     c.execute("UPDATE richieste SET stato=?, aggiornata=? WHERE id=?", (nuovo, ora, r["id"]))
     c.execute("INSERT INTO storico (richiesta_id,quando,utente_id,azione,nota) VALUES (?,?,?,?,?)",
-              (r["id"], ora, u["id"], nuovo, nota))
+              (r["id"], ora, u["id"], az if az.endswith("_annullamento") else nuovo, nota))
     t = TIPI[r["tipo"]]
     link = f"#/richiesta/{r['id']}"
+    if az in ("chiedi_annullamento", "ritira_annullamento"):
+        testo = "chiede di annullare" if az == "chiedi_annullamento" else "non chiede più di annullare"
+        notifica_ruoli(c, ["segreteria"], f"{nome_completo(u)} {testo} la richiesta n. {r['id']} ({t['nome']}, "
+                       f"{it_data(r['dal'])})", link, tranne=u["id"])
+        return {"ok": True, "stato": nuovo}
+    if az in ("conferma_annullamento", "nega_annullamento"):
+        esito = "annullamento confermato: i giorni tornano disponibili" if nuovo == "annullata" else \
+            "annullamento non accolto"
+        if r["utente_id"] != u["id"]:
+            notifica(c, r["utente_id"], f"{t['nome']} (n. {r['id']}): {esito}" + (f" – {nota}" if nota else ""), link)
+        return {"ok": True, "stato": nuovo}
     if r["utente_id"] != u["id"]:
         notifica(c, r["utente_id"], f"{t['nome']} (n. {r['id']}): {STATI[nuovo].lower()}"
                  + (f" – {nota}" if nota else ""), link)
@@ -1297,12 +1338,63 @@ def api_azione(c, u, m, corpo, q, req):
     return {"ok": True, "stato": nuovo}
 
 
+def stato_prima_annullamento(c, r):
+    """Lo stato che la richiesta aveva prima della richiesta di annullamento."""
+    for (a,) in c.execute("SELECT azione FROM storico WHERE richiesta_id=? ORDER BY id DESC", (r["id"],)):
+        if a in ("autorizzata", "registrata"):
+            return a
+    return "autorizzata"
+
+
+@rotta("POST", "/api/assenze-segreteria/annulla")
+def api_annulla_assenza_segreteria(c, u, m, corpo, q, req):
+    """Annullamento di un'assenza registrata dalla segreteria (letta dal programma della segreteria):
+    diventa una richiesta dello Sportello in stato «annullamento» che la segreteria conferma o no.
+    SmartDesk non modifica il programma della segreteria: lì la cancella la segreteria."""
+    a = c.execute("SELECT * FROM assenze_argo WHERE id=? AND utente_id=?", (int(corpo.get("id") or 0), u["id"])).fetchone()
+    if not a:
+        raise Errore("Assenza non trovata: rientra con le credenziali Argo per aggiornare l'elenco.", 404)
+    if a["stato"] != "registrata":
+        raise Errore("Questa richiesta è ancora in corso nel programma della segreteria: chiedi alla segreteria di ritirarla.")
+    motivo = str(corpo.get("nota") or "").strip()[:1000]
+    if not motivo:
+        raise Errore("Scrivi il motivo dell'annullamento.")
+    tipo = a["tipo"] if a["tipo"] in TIPI else "generica"
+    gia = c.execute("SELECT id, stato FROM richieste WHERE utente_id=? AND tipo=? AND dal=? AND al=? AND "
+                    "stato IN ('annullamento','registrata','autorizzata') AND campi LIKE '%\"origine\": \"segreteria\"%'",
+                    (u["id"], tipo, a["inizio"], a["fine"])).fetchone()
+    if gia and gia["stato"] == "annullamento":
+        raise Errore(f"Hai già chiesto l'annullamento (richiesta n. {gia['id']}).")
+    ora = adesso().isoformat()
+    campi = {"origine": "segreteria", "assenza": a["descrizione"] or TIPI[tipo]["nome"]}
+    if gia:
+        rid = gia["id"]
+        c.execute("UPDATE richieste SET stato='annullamento', aggiornata=? WHERE id=?", (ora, rid))
+    else:
+        rid = c.execute("INSERT INTO richieste (utente_id,tipo,dal,al,ora_da,ora_a,quantita,campi,note,stato,creata,"
+                        "aggiornata) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (u["id"], tipo, a["inizio"], a["fine"], None, None, a["quantita"],
+                         json.dumps(campi, ensure_ascii=False), "", "annullamento", ora, ora)).lastrowid
+        c.execute("INSERT INTO storico (richiesta_id,quando,utente_id,azione,nota) VALUES (?,?,?,?,?)",
+                  (rid, ora, None, "registrata", "Assenza registrata dalla segreteria"))
+    c.execute("INSERT INTO storico (richiesta_id,quando,utente_id,azione,nota) VALUES (?,?,?,?,?)",
+              (rid, ora, u["id"], "chiedi_annullamento", motivo))
+    notifica_ruoli(c, ["segreteria"], f"{nome_completo(u)} chiede di annullare: {campi['assenza']} del "
+                   f"{it_data(a['inizio'])}", f"#/richiesta/{rid}", tranne=u["id"])
+    return {"ok": True, "id": rid}
+
+
 # ---- gestione (segreteria, DSGA, dirigente)
 def lista_da_lavorare(c, u):
     out = []
-    for r in c.execute("SELECT * FROM richieste WHERE stato IN ('inviata','verificata') ORDER BY dal IS NULL, dal"):
+    for r in c.execute("SELECT * FROM richieste WHERE stato IN ('inviata','verificata','annullamento') "
+                       "ORDER BY dal IS NULL, dal"):
         rich = c.execute("SELECT * FROM utenti WHERE id=?", (r["utente_id"],)).fetchone()
         az = set(azioni_possibili(u, r, rich)) - {"annulla", "modifica"}
+        if r["stato"] == "annullamento":
+            if u["ruolo"] == "segreteria" and az:
+                out.append(r)
+            continue
         if u["ruolo"] == "segreteria":
             if r["stato"] == "inviata" and az:
                 out.append(r)
@@ -1315,7 +1407,7 @@ def assenti(c, giorno):
     iso = giorno.isoformat()
     righe = c.execute("SELECT r.*, u.nome, u.cognome, u.ruolo, u.plesso FROM richieste r JOIN utenti u ON "
                       "u.id=r.utente_id WHERE r.dal<=? AND r.al>=? AND r.tipo<>'generica' AND r.stato IN "
-                      "('autorizzata','registrata','inviata','verificata','da_integrare') ORDER BY u.cognome",
+                      "('autorizzata','registrata','inviata','verificata','da_integrare','annullamento') ORDER BY u.cognome",
                       (iso, iso)).fetchall()
     return [dict(id=r["id"], nome=f"{r['cognome']} {r['nome']}", ruolo=RUOLI[r["ruolo"]], plesso=r["plesso"],
                  tipo=TIPI[r["tipo"]]["nome"], stato=r["stato"], stato_nome=STATI[r["stato"]],

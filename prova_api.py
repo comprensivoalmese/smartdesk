@@ -136,9 +136,9 @@ def avvia_finto_argo():
                     {"pk": 11, "desMessaggio": "Circolare 48 - Collegio docenti", "desCategoria": "Circolari",
                      "datGiorno": f"{a0}-11-10", "numAllegati": 1, "docentiPv": True,
                      "docentiPvConfermata": 11 in stato, "flgAdesione": None},
-                    {"pk": 12, "desMessaggio": "Sciopero del 20 novembre", "datGiorno": f"{a0}-11-12", "numAllegati": 0,
+                    {"pk": "12AB9F", "desMessaggio": "Sciopero del 20 novembre", "datGiorno": f"{a0}-11-12", "numAllegati": 0,
                      "docentiPv": False, "docentiAd": True, "datScadenzaAdesione": f"{a0 + 1}-08-30",
-                     "docentiAdConfermata": 12 in stato, "flgAdesione": stato.get(12, (None,))[0],
+                     "docentiAdConfermata": "12AB9F" in stato, "flgAdesione": stato.get("12AB9F", (None,))[0],
                      "adesioneModificabile": True},
                     {"pk": 13, "desMessaggio": "Vecchia circolare", "datGiorno": f"{a0}-09-10", "numAllegati": 0,
                      "docentiPv": True, "docentiPvConfermata": True, "dataConfermaPv": "11/09/2026"}]}}
@@ -298,6 +298,22 @@ def main():
     controlla(f == b"ciao", "allegato scaricabile dal proprietario")
     controlla(ata.chiama(f"/api/allegati/{det['allegati'][0]['id']}")[0] == 403, "allegato negato ad altri")
     controlla(ata.chiama(f"/api/richieste/{rid}")[0] == 404, "richiesta altrui invisibile")
+    usati_ferie = lambda: next(k for k in doc.chiama("/api/contatori")[1]["contatori"] if k["tipo"] == "ferie")["usati"]
+    u0 = usati_ferie()
+    s, e = doc.chiama(f"/api/richieste/{rid}/azione", {"azione": "chiedi_annullamento"})
+    controlla(s == 400 and "motivazione" in e["errore"], "annullamento di una richiesta concessa: serve il motivo")
+    s, r2 = doc.chiama(f"/api/richieste/{rid}/azione", {"azione": "chiedi_annullamento", "nota": "Sono rimasto a scuola"})
+    controlla(s == 200 and r2["stato"] == "annullamento", "annullamento chiesto su una richiesta autorizzata")
+    controlla(usati_ferie() == u0, "mentre si aspetta la conferma i giorni restano usati")
+    controlla(any(x["id"] == rid for x in seg.chiama("/api/gestione/da-lavorare")[1]), "la segreteria vede l'annullamento da lavorare")
+    s, _ = doc.chiama(f"/api/richieste/{rid}/azione", {"azione": "conferma_annullamento"})
+    controlla(s == 400, "il docente non conferma da solo l'annullamento")
+    s, r2 = doc.chiama(f"/api/richieste/{rid}/azione", {"azione": "ritira_annullamento"})
+    controlla(s == 200 and r2["stato"] == "autorizzata", "richiesta di annullamento ritirata: torna autorizzata")
+    doc.chiama(f"/api/richieste/{rid}/azione", {"azione": "chiedi_annullamento", "nota": "Sono rimasto a scuola"})
+    s, r2 = seg.chiama(f"/api/richieste/{rid}/azione", {"azione": "conferma_annullamento"})
+    controlla(s == 200 and r2["stato"] == "annullata" and usati_ferie() == u0 - det["quantita"],
+              "annullamento confermato dalla segreteria: i giorni tornano disponibili")
     s, n = doc.chiama("/api/notifiche")
     controlla(any("autorizzata" in x["testo"] for x in n["elenco"]), "notifica di autorizzazione")
 
@@ -438,12 +454,31 @@ def main():
         dopo = server.utilizzo(c0, uid_g, "motivi_personali", server.inizio_anno(), server.fine_anno(server.oggi()))
         c0.execute("DELETE FROM richieste WHERE creata='x'")
     controlla(prima == dopo, "una richiesta dello Sportello già registrata in segreteria non si conta due volte")
+    mp_reg = next(x for x in ass if x["tipo"] == "motivi_personali" and x["stato"] == "registrata")
+    mp_att = next(x for x in ass if x["stato"] == "richiesta")
+    s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"]})
+    controlla(s == 400 and "motivo" in e["errore"], "annullare un'assenza della segreteria: serve il motivo")
+    s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_att["id"], "nota": "x"})
+    controlla(s == 400, "una richiesta ancora in corso in segreteria non si annulla da qui")
+    s, ra = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "Giorno sbagliato"})
+    controlla(s == 200, f"annullamento chiesto per un'assenza registrata dalla segreteria ({ra})")
+    s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "di nuovo"})
+    controlla(s == 400 and "già chiesto" in e["errore"], "non si chiede due volte")
+    ct2 = g.chiama("/api/contatori")[1]
+    x2 = next(x for x in ct2["segreteria"]["assenze"] if x["id"] == mp_reg["id"])
+    controlla(x2["richiesta"] and x2["richiesta"]["stato"] == "annullamento", "l'assenza mostra l'annullamento richiesto")
+    mp2 = next(k for k in ct2["contatori"] if k["tipo"] == "motivi_personali")
+    controlla((mp2["usati"], mp2["attesa"]) == (mp["usati"], mp["attesa"]), "i conteggi non cambiano due volte")
+    s, r2 = seg.chiama(f"/api/richieste/{ra['id']}/azione", {"azione": "nega_annullamento", "nota": "Assenza confermata"})
+    controlla(s == 200 and r2["stato"] == "registrata", "annullamento non accolto: l'assenza resta registrata")
+    s, ra2 = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "Riprovo"})
+    controlla(s == 200 and ra2["id"] == ra["id"], "si può richiedere di nuovo sulla stessa richiesta")
     s, bd = g.chiama("/api/didup/bacheca")
     controlla(s == 200 and bd.get("collegata") and bd.get("da_fare") == 2,
               f"bacheca DidUP collegata all'accesso Argo: 2 da confermare ({bd.get('motivo') or bd.get('da_fare')})")
-    s, e = g.chiama("/api/didup/bacheca/12/conferma", {"adesione": "Z"})
+    s, e = g.chiama("/api/didup/bacheca/12AB9F/conferma", {"adesione": "Z"})
     controlla(s == 400, "adesione con risposta non valida: rifiutata")
-    s, e = g.chiama("/api/didup/bacheca/12/conferma", {})
+    s, e = g.chiama("/api/didup/bacheca/12AB9F/conferma", {})
     controlla(s == 400 and "presa visione" in e["errore"], "presa visione su un messaggio che chiede solo l'adesione: rifiutata")
     s, r = g.chiama("/api/didup/bacheca/11/conferma", {})
     controlla(s == 200 and r["messaggio"]["pv_fatta"] and r["scaricati"] == 1 and 911 in finto.scaricati,
@@ -451,8 +486,8 @@ def main():
     controlla(finto.conferme["giulia.r"][11] == (None, True, True), "a DidUP arriva presa visione con download effettuato")
     s, pdf = g.chiama("/api/didup/allegato/11/0")
     controlla(s == 200 and pdf.startswith(b"%PDF"), "l'allegato scaricato si apre da SmartDesk")
-    s, r = g.chiama("/api/didup/bacheca/12/conferma", {"adesione": "A"})
-    controlla(s == 200 and r["messaggio"]["adesione"] == "A" and finto.conferme["giulia.r"][12][0] == "A",
+    s, r = g.chiama("/api/didup/bacheca/12AB9F/conferma", {"adesione": "A"})
+    controlla(s == 200 and r["messaggio"]["adesione"] == "A" and finto.conferme["giulia.r"]["12AB9F"][0] == "A",
               "adesione «Aderisco» registrata")
     s, bd = g.chiama("/api/didup/bacheca")
     controlla(bd.get("da_fare") == 0, "dopo le conferme non resta niente da fare")

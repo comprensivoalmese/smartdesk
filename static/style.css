@@ -191,7 +191,8 @@ a.tessera:hover { transform: translateY(-2px); border-color: var(--line-forte); 
 .chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
 .chip.inviata { background: var(--info-soft); color: var(--info); }
 .chip.verificata { background: var(--primary-soft); color: var(--primary); }
-.chip.da_integrare { background: var(--warn-soft); color: var(--warn); }
+.chip.da_integrare, .chip.annullamento { background: var(--warn-soft); color: var(--warn); }
+a.chip { text-decoration: none; }
 .chip.autorizzata, .chip.registrata, .chip.evasa { background: var(--ok-soft); color: var(--ok); }
 .chip.respinta, .chip.revocata { background: var(--bad-soft); color: var(--bad); }
 .chip.annullata { text-decoration: line-through; }
