@@ -65,6 +65,14 @@ function livelloScadenza(iso, daFare = true) {
   const g = Math.round((new Date(iso.slice(0, 10) + 'T12:00') - new Date(oggiIso() + 'T12:00')) / 864e5);
   return g < 0 ? 'scaduta' : g === 0 ? 'scade-oggi' : g === 1 ? 'scade-domani' : '';
 }
+// Bacheca: in alto solo i messaggi da confermare non ancora scaduti; quelli scaduti tornano al loro posto per data.
+function ordinaBacheca(msg) {
+  const oggi = oggiIso();
+  const evid = x => ((x.pv_richiesta && !x.pv_fatta) || (x.ad_richiesta && !x.ad_fatta))
+    && !(x.ad_richiesta && x.ad_scadenza && String(x.ad_scadenza).slice(0, 10) < oggi);
+  return msg.map((x, i) => [x, i]).sort(([a, i], [b, j]) => (evid(b) - evid(a))
+    || ((b.data || '') > (a.data || '') ? 1 : (b.data || '') < (a.data || '') ? -1 : i - j)).map(p => p[0]);
+}
 const NOMI_SCADENZA = { 'scade-domani': 'Scade domani', 'scade-oggi': 'Scade oggi', scaduta: 'Scaduta' };
 const chipScadenza = l => l ? `<span class="chip ${l}">${NOMI_SCADENZA[l]}</span>` : '';
 const oggiIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -730,6 +738,7 @@ async function caricaDidup(box, tutte = false) {
       <div class="spazio"><b>Circolari DidUP</b><div class="muted piccolo">${esc(d.motivo)}</div></div></div></div>`;
     return;
   }
+  d.messaggi = ordinaBacheca(d.messaggi);
   const msg = tutte ? d.messaggi : d.messaggi.filter((x, i) => (x.pv_richiesta && !x.pv_fatta) || (x.ad_richiesta && !x.ad_fatta) || i < d.da_fare + 5);
   const soloPv = d.messaggi.filter(x => x.pv_richiesta && !x.pv_fatta && !x.ad_richiesta);
   box.innerHTML = `<div class="card didup">

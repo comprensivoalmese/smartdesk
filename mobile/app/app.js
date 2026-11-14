@@ -51,6 +51,14 @@ function livelloScadenza(iso, daFare = true) {
   const g = Math.round((new Date(iso + 'T12:00') - new Date(oggiIso() + 'T12:00')) / 864e5);
   return g < 0 ? 'scaduta' : g === 0 ? 'scade-oggi' : g === 1 ? 'scade-domani' : '';
 }
+// Bacheca: in alto solo i messaggi da confermare non ancora scaduti; quelli scaduti tornano al loro posto per data.
+function ordinaBacheca(msg) {
+  const oggi = oggiIso();
+  const evid = x => ((x.pv_richiesta && !x.pv_fatta) || (x.ad_richiesta && !x.ad_fatta))
+    && !(x.ad_richiesta && x.ad_scadenza && String(x.ad_scadenza).slice(0, 10) < oggi);
+  return msg.map((x, i) => [x, i]).sort(([a, i], [b, j]) => (evid(b) - evid(a))
+    || ((b.data || '') > (a.data || '') ? 1 : (b.data || '') < (a.data || '') ? -1 : i - j)).map(p => p[0]);
+}
 const NOMI_SCADENZA = { 'scade-domani': 'Scade domani', 'scade-oggi': 'Scade oggi', scaduta: 'Scaduta' };
 const chipScadenza = l => l ? `<span class="chip ${l}">${NOMI_SCADENZA[l]}</span>` : '';
 
@@ -323,6 +331,7 @@ function finestraAnnulla(id, cosa) {
 async function vistaBacheca(c, tutte = false) {
   const d = await bacheca();
   const daFare = x => (x.pv_richiesta && !x.pv_fatta) || (x.ad_richiesta && !x.ad_fatta);
+  d.messaggi = ordinaBacheca(d.messaggi);
   const msg = tutte ? d.messaggi : d.messaggi.filter((x, i) => daFare(x) || i < d.da_fare + 8);
   const soloPv = d.messaggi.filter(x => x.pv_richiesta && !x.pv_fatta && !x.ad_richiesta);
   c.innerHTML = `<div class="card didup">
