@@ -137,26 +137,51 @@ function chiedi({ titolo, testo = '', nota = false, notaObbligatoria = false, bo
 }
 
 // ------------------------------------------------------------------ accesso
-function mostraAccesso() {
+async function mostraAccesso() {
   clearInterval(TIMER);
   document.title = 'Sportello Personale – Accesso';
+  let info = { scuola: '', argo: false };
+  try { info = await (await fetch('/api/accesso-info')).json(); } catch { /* offline */ }
+  let modo = 'sportello';
+  try { modo = info.argo ? (localStorage.getItem('sp-modo') || 'argo') : 'sportello'; } catch { modo = info.argo ? 'argo' : 'sportello'; }
   $('#app').innerHTML = `
   <div class="accesso"><form class="card" id="f-acc">
-    <div class="riga" style="margin-bottom:18px"><img src="/icona.svg" alt=""><div><h1 style="margin:0">Sportello Personale</h1><div class="muted">Richieste, bacheca e presenze</div></div></div>
-    <label class="campo"><span>Nome utente</span><input type="text" name="username" autocomplete="username" autocapitalize="none" required></label>
+    <div class="riga" style="margin-bottom:18px"><img src="/icona.svg" alt=""><div><h1 style="margin:0">Sportello Personale</h1><div class="muted">${esc(info.scuola || 'Richieste, bacheca e presenze')}</div></div></div>
+    ${info.argo ? `<div class="schede" style="margin-bottom:16px"><button type="button" data-modo="argo">Credenziali Argo</button><button type="button" data-modo="sportello">Account Sportello</button></div>` : ''}
+    <p class="muted piccolo" id="acc-spiega" style="margin-top:0"></p>
+    <label class="campo"><span id="acc-utente">Nome utente</span><input type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label class="campo"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
-    <button class="btn primario grande" style="width:100%">Entra</button>
-    <p class="muted piccolo" style="margin:14px 0 0">Password dimenticata? Chiedi alla segreteria del personale di reimpostarla.</p>
+    <div id="acc-errore"></div>
+    <button class="btn primario grande" style="width:100%" id="acc-entra">Entra</button>
+    <p class="muted piccolo" style="margin:14px 0 0" id="acc-aiuto"></p>
   </form></div>`;
-  $('#f-acc').onsubmit = async e => {
-    e.preventDefault();
-    const fd_ = new FormData(e.target);
-    try {
-      await api('/api/accesso', { username: fd_.get('username'), password: fd_.get('password') });
-      avvia();
-    } catch (err) { toast(err.message, true); }
+  const f = $('#f-acc');
+  const imposta = m => {
+    modo = m;
+    $$('[data-modo]', f).forEach(b => b.classList.toggle('attiva', b.dataset.modo === m));
+    $('#acc-spiega').textContent = m === 'argo' ? 'Usa lo stesso nome utente e la stessa password del portale Argo. Lo Sportello li controlla con Argo e non salva la password.' : '';
+    $('#acc-utente').textContent = m === 'argo' ? 'Nome utente Argo' : 'Nome utente';
+    $('#acc-aiuto').textContent = m === 'argo' ? 'Password Argo dimenticata? Si recupera dal portale Argo.' : 'Password dimenticata? Chiedi alla segreteria del personale di reimpostarla.';
+    $('#acc-errore').innerHTML = '';
   };
-  $('input', $('#f-acc')).focus();
+  $$('[data-modo]', f).forEach(b => b.onclick = () => { imposta(b.dataset.modo); f.username.focus(); });
+  imposta(modo);
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const b = $('#acc-entra');
+    b.disabled = true;
+    b.textContent = modo === 'argo' ? 'Controllo con Argo…' : 'Entra';
+    try {
+      await api('/api/accesso', { username: f.username.value, password: f.password.value, modo });
+      try { localStorage.setItem('sp-modo', modo); } catch { /* niente */ }
+      avvia();
+    } catch (err) {
+      $('#acc-errore').innerHTML = `<div class="anteprima no">${esc(err.message)}</div>`;
+      f.password.value = '';
+      b.disabled = false; b.textContent = 'Entra';
+    }
+  };
+  f.username.focus();
 }
 
 // ------------------------------------------------------------------ impalcatura
@@ -860,7 +885,9 @@ function schedaDipendente(u) {
       <label class="campo"><span>Ore giornaliere (cartellino)</span><input type="number" name="ore_giornaliere" step="0.1" min="0" max="12" value="${u.ore_giornaliere}"></label>
       <label class="campo"><span>Ferie spettanti</span><input type="number" name="ferie_spettanti" min="0" max="40" value="${u.ferie_spettanti}"><small>32, oppure 30 nei primi 3 anni</small></label>
       <label class="campo"><span>Ferie residue anno precedente</span><input type="number" name="ferie_ap" min="0" max="40" value="${u.ferie_ap}"></label>
+      <label class="campo"><span>Utente Argo</span><input type="text" name="argo_utente" value="${esc(u.argo_utente || '')}" autocapitalize="none" spellcheck="false" placeholder="nome utente del portale Argo"><small>Per entrare con le credenziali Argo</small></label>
     </div>
+    ${nuovo ? `<label class="spunta"><input type="checkbox" name="solo_argo"><span>Entra solo con Argo (nessuna password dello Sportello)</span></label>` : (u.solo_argo ? '<p class="muted piccolo">Entra solo con Argo. «Reimposta password» gli dà anche una password dello Sportello.</p>' : '')}
     ${nuovo ? '' : `<label class="spunta"><input type="checkbox" name="attivo" ${u.attivo ? 'checked' : ''}><span>Account attivo</span></label>`}
     </form>
     ${nuovo ? '' : `<div class="riga" style="margin-top:6px"><a class="btn mini" href="#/situazione?utente=${u.id}">Situazione</a><a class="btn mini" href="#/presenze?utente=${u.id}">Cartellino</a><a class="btn mini" href="#/gestione/richieste?utente=${u.id}">Richieste</a><button class="btn mini pericolo" id="u-pw">Reimposta password</button></div>`}
@@ -870,6 +897,7 @@ function schedaDipendente(u) {
   const valori = () => {
     const o = Object.fromEntries(new FormData(form));
     if (!nuovo) o.attivo = form.attivo.checked;
+    else o.solo_argo = form.solo_argo.checked;
     return o;
   };
   $('#u-ok', f.el).onclick = async () => {
@@ -896,12 +924,19 @@ async function gImpostazioni(g) {
     <label class="spunta"><input type="checkbox" name="settimana_corta" ${imp.settimana_corta === '1' ? 'checked' : ''}><span>Settimana corta: il sabato non è lavorativo (nel conteggio dei giorni)</span></label>
     <label class="campo"><span>Festa del patrono (MM-GG)</span><input type="text" name="patrono" value="${esc(imp.patrono)}" placeholder="es. 06-24" style="max-width:160px"><small>Domeniche e festività nazionali sono già escluse.</small></label>
     <label class="spunta"><input type="checkbox" name="timbrature_docenti" ${imp.timbrature_docenti === '1' ? 'checked' : ''}><span>Timbrature dall'app anche per i docenti</span></label>
+    <h2 class="sezione">Accesso con Argo</h2>
+    <label class="spunta"><input type="checkbox" name="argo_attivo" ${imp.argo_attivo === '1' ? 'checked' : ''}><span>Il personale può entrare con nome utente e password del portale Argo (verificati con Argo, mai salvati)</span></label>
+    <label class="campo"><span>Codice della scuola su Argo</span><input type="text" name="argo_codice_scuola" value="${esc(imp.argo_codice_scuola)}" placeholder="es. SC12345" style="max-width:200px"></label>
+    <label class="spunta"><input type="checkbox" name="argo_nuovi" ${imp.argo_nuovi === '1' ? 'checked' : ''}><span>Crea l'account al primo accesso con Argo se la persona non è ancora nell'elenco (serve il codice scuola)</span></label>
+    <label class="campo"><span>Ruolo degli account creati così</span><select name="argo_ruolo_nuovi" style="max-width:220px"><option value="docente" ${imp.argo_ruolo_nuovi === 'docente' ? 'selected' : ''}>Docente</option><option value="ata" ${imp.argo_ruolo_nuovi === 'ata' ? 'selected' : ''}>Personale ATA</option></select>
+      <small>La segreteria riceve una notifica e può correggere il ruolo in Personale. Chi è già nell'elenco viene riconosciuto dal campo «Utente Argo» o da nome e cognome.</small></label>
     <button class="btn primario">Salva</button></form>`;
   const f = $('#f-imp');
   f.onsubmit = async e => {
     e.preventDefault();
     try {
-      await api('/api/impostazioni', { scuola: f.scuola.value, patrono: f.patrono.value, settimana_corta: f.settimana_corta.checked ? '1' : '0', timbrature_docenti: f.timbrature_docenti.checked ? '1' : '0' });
+      await api('/api/impostazioni', { scuola: f.scuola.value, patrono: f.patrono.value, settimana_corta: f.settimana_corta.checked ? '1' : '0', timbrature_docenti: f.timbrature_docenti.checked ? '1' : '0',
+        argo_attivo: f.argo_attivo.checked ? '1' : '0', argo_codice_scuola: f.argo_codice_scuola.value, argo_nuovi: f.argo_nuovi.checked ? '1' : '0', argo_ruolo_nuovi: f.argo_ruolo_nuovi.value });
       IO = await api('/api/io');
       toast('Impostazioni salvate.');
       disegnaShell(); naviga();
@@ -918,16 +953,17 @@ async function vistaProfilo(c) {
       <dl class="dati"><dt>Nome utente</dt><dd>${esc(u.username)}</dd><dt>Profilo</dt><dd>${esc(u.profilo || '—')}</dd><dt>Plesso</dt><dd>${esc(u.plesso || '—')}</dd><dt>Email</dt><dd>${esc(u.email || '—')}</dd></dl>
       <div class="sezione"><h3>Aspetto</h3><div class="filtri">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([k, n]) => `<button class="pillola ${tema === k ? 'attiva' : ''}" data-tema="${k}">${n}</button>`).join('')}</div></div>
       <button class="btn pericolo" id="p-esci">${ico('esci')} Esci</button></div>
+    ${u.solo_argo ? `<div class="card"><h2>Accesso</h2><p>Entri con le credenziali del portale Argo (utente <b>${esc(u.argo_utente)}</b>). La password si cambia sul portale Argo.</p></div>` : `
     <form class="card" id="f-pw"><h2>Cambia password</h2>
       ${u.cambia_password ? '<div class="avviso">Stai usando una password provvisoria: sceglierne una tua.</div>' : ''}
       <label class="campo"><span>Password attuale</span><input type="password" name="attuale" autocomplete="current-password"></label>
       <label class="campo"><span>Nuova password</span><input type="password" name="nuova" autocomplete="new-password" minlength="8"><small>Almeno 8 caratteri.</small></label>
       <label class="campo"><span>Ripeti la nuova password</span><input type="password" name="ripeti" autocomplete="new-password"></label>
-      <button class="btn primario">Cambia password</button></form></div>`;
+      <button class="btn primario">Cambia password</button></form>`}</div>`;
   $('#p-esci').onclick = esci;
   $$('[data-tema]', c).forEach(b => b.onclick = () => { applicaTema(b.dataset.tema); naviga(); });
   const f = $('#f-pw');
-  f.onsubmit = async e => {
+  if (f) f.onsubmit = async e => {
     e.preventDefault();
     if (f.nuova.value !== f.ripeti.value) { toast('Le due password non coincidono.', true); return; }
     try {

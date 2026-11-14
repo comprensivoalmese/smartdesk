@@ -20,6 +20,26 @@ Usa solo Python 3.10+ (libreria standard): niente da installare. I dati stanno i
 - Per usarla dai telefoni della rete della scuola: `python server.py --host 0.0.0.0` e aprire
   `http://<IP del PC>:8850` (serve una regola del firewall per la porta).
 
+## Accesso con le credenziali Argo
+
+Il personale entra con lo stesso nome utente e la stessa password del portale Argo. Lo Sportello fa lo stesso
+accesso del sito Argo (auth.portaleargo.it), controlla che le credenziali siano giuste e **non salva la password**.
+Il server deve avere internet.
+
+- **Prima prova**: doppio clic su `prova-argo.bat`. Chiede il tuo nome utente Argo e il codice della scuola, poi crea il
+  tuo account (ruolo dirigente, per vedere anche la Gestione), attiva Argo e apre lo Sportello: scegli «Credenziali Argo».
+  Equivale a `python server.py --attiva-argo SC15290 --collega-argo <utente> --ruolo dirigente`.
+- Come si riconosce chi entra: 1) dal campo «Utente Argo» della sua scheda in Gestione › Personale; 2) altrimenti da nome
+  e cognome che arrivano da Argo (se c'è una sola persona con quel nome, la scheda si collega da sola); 3) altrimenti, se
+  in Impostazioni è attiva «Crea l'account al primo accesso», si crea un account nuovo (docente o ATA) e la segreteria
+  riceve una notifica. Per crearlo il codice scuola deve comparire nei dati che Argo restituisce.
+- Si fa un solo tentativo verso Argo per ogni invio; dopo 3 password sbagliate si aspetta 15 minuti, così Argo non
+  blocca l'account.
+- Non gestito ancora: account Argo con secondo codice (OTP), scelta tra più profili, consensi da accettare.
+  Il messaggio d'errore lo dice; chi è in questi casi usa l'account dello Sportello.
+- Diagnosi: dopo ogni accesso Argo riuscito `dati\argo-campi.json` elenca i **nomi** dei campi ricevuti da Argo (senza i
+  valori). Serve a capire se Argo manda nome, cognome e codice scuola.
+
 ## Che cosa fa
 
 **Per tutto il personale**

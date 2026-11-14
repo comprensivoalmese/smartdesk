@@ -9,4 +9,9 @@ documenti personali, gestione). Creata il 14/11/2026 per Andrea Giorda. Si lavor
 - Collaudo: `python prova_api.py` (deve dire TUTTO OK).
 - Password: mai in chat. Demo in `dati-demo\credenziali-demo.txt`, primo dirigente in `dati\primo-accesso.txt`.
 - **Niente push su GitHub** (regola dell'utente per i progetti nuovi): solo commit locali.
-- Non usare nomi o marchi Argo nell'interfaccia.
+- Non usare nomi o marchi Argo nell'interfaccia (a parte "Credenziali Argo" per l'accesso).
+- Accesso Argo (14/11): `argo.py` (OIDC come Documents\assenze-argo, solo stdlib, password mai salvata), impostazioni
+  `argo_*`, colonna `utenti.argo_utente`, account "solo Argo" = hash vuoto. Collaudato con un finto Argo in prova_api.py
+  e verificato che la pagina vera di Argo ha ancora il modulo `loginForm`. **Mai provato con credenziali vere**: lo fa
+  l'utente con `prova-argo.bat`. Ignoti: quali claims manda Argo (vedi `dati\argo-campi.json`), OTP non gestito.
+  Non fare tentativi di accesso ad Argo con credenziali dell'utente: rischio di blocco dell'account.

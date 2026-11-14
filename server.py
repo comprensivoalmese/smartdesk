@@ -19,9 +19,12 @@ import secrets
 import sqlite3
 import sys
 import time
+import unicodedata
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
+
+import argo
 
 QUI = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(QUI, "static")
@@ -266,6 +269,10 @@ IMPOSTAZIONI_BASE = {
     "settimana_corta": "0",
     "patrono": "",
     "timbrature_docenti": "0",
+    "argo_attivo": "0",          # accesso con le credenziali Argo
+    "argo_codice_scuola": "",    # es. SC15290: per creare account nuovi deve comparire nei dati Argo
+    "argo_nuovi": "0",           # crea l'account al primo accesso Argo se non c'è
+    "argo_ruolo_nuovi": "docente",
 }
 
 
@@ -281,6 +288,9 @@ def prepara_db():
     with db() as c:
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
+        colonne = {r["name"] for r in c.execute("PRAGMA table_info(utenti)")}
+        if "argo_utente" not in colonne:
+            c.execute("ALTER TABLE utenti ADD COLUMN argo_utente TEXT DEFAULT ''")
         for k, v in IMPOSTAZIONI_BASE.items():
             c.execute("INSERT OR IGNORE INTO impostazioni VALUES (?,?)", (k, v))
 
@@ -296,6 +306,8 @@ def hash_password(pw, sale=None):
 
 
 def password_giusta(pw, u):
+    if not u["hash"]:  # account che entra solo con Argo
+        return False
     return hmac.compare_digest(hash_password(pw, u["sale"])[0], u["hash"])
 
 
@@ -326,8 +338,10 @@ def notifica_ruoli(c, ruoli, testo, link="", tranne=None):
 
 def utente_pubblico(u):
     return {k: u[k] for k in ("id", "username", "nome", "cognome", "ruolo", "profilo", "plesso", "email",
-                              "ferie_spettanti", "ferie_ap", "ore_giornaliere", "attivo", "cambia_password")} | {
-        "ruolo_nome": RUOLI.get(u["ruolo"], u["ruolo"]), "categoria": categoria(u)}
+                              "ferie_spettanti", "ferie_ap", "ore_giornaliere", "attivo", "cambia_password",
+                              "argo_utente")} | {
+        "ruolo_nome": RUOLI.get(u["ruolo"], u["ruolo"]), "categoria": categoria(u),
+        "solo_argo": not u["hash"]}
 
 
 # ---------------------------------------------------------------- allegati
@@ -689,6 +703,70 @@ def csv_risposta(nome, intestazione, righe):
 
 
 TENTATIVI = {}
+TENTATIVI_ARGO = {}
+
+
+def norma(testo):
+    testo = unicodedata.normalize("NFD", testo or "")
+    testo = "".join(ch for ch in testo if unicodedata.category(ch) != "Mn").upper()
+    return re.sub(r"[^A-Z]", "", testo)
+
+
+def utente_da_argo(c, digitato, claims):
+    """Trova (o crea) l'utente dello Sportello che corrisponde all'identità Argo."""
+    imp = impostazioni(c)
+    idn = argo.identita(claims, digitato)
+    chiavi = {digitato.lower(), idn["username"]}
+    for x in c.execute("SELECT * FROM utenti WHERE argo_utente<>''").fetchall():
+        if x["argo_utente"].lower() in chiavi:
+            if not x["attivo"]:
+                raise Errore("Il tuo account dello Sportello è disattivato: chiedi alla segreteria.", 403)
+            if x["cognome"] == "(da completare)" and idn["cognome"]:
+                c.execute("UPDATE utenti SET nome=?, cognome=? WHERE id=?", (idn["nome"] or x["nome"], idn["cognome"], x["id"]))
+            return c.execute("SELECT * FROM utenti WHERE id=?", (x["id"],)).fetchone()
+    if idn["nome"] and idn["cognome"]:
+        cand = [x for x in c.execute("SELECT * FROM utenti WHERE attivo=1 AND (argo_utente='' OR argo_utente IS NULL)")
+                if norma(x["cognome"]) == norma(idn["cognome"]) and norma(x["nome"]) == norma(idn["nome"])]
+        if len(cand) == 1:
+            c.execute("UPDATE utenti SET argo_utente=? WHERE id=?", (digitato.lower(), cand[0]["id"]))
+            return c.execute("SELECT * FROM utenti WHERE id=?", (cand[0]["id"],)).fetchone()
+    if imp.get("argo_nuovi") != "1":
+        raise Errore("Le credenziali Argo sono giuste, ma il tuo account non è ancora collegato allo Sportello: "
+                     "chiedi alla segreteria di inserire il tuo nome utente Argo nella tua scheda.", 403)
+    codice = imp.get("argo_codice_scuola", "").strip().upper()
+    if not codice or not any(codice in t for t in idn["testi"]):
+        raise Errore("Non risulti tra il personale di questa scuola: chiedi alla segreteria di collegare il tuo "
+                     "account Argo.", 403)
+    base = re.sub(r"[^a-z0-9._-]", "", digitato.lower())[:36] or "utente"
+    username, i = base, 1
+    while c.execute("SELECT 1 FROM utenti WHERE username=?", (username,)).fetchone():
+        i += 1
+        username = f"{base}-{i}"
+    ruolo = imp.get("argo_ruolo_nuovi") if imp.get("argo_ruolo_nuovi") in ("docente", "ata") else "docente"
+    nome, cognome = idn["nome"] or digitato, idn["cognome"] or "(da completare)"
+    cur = c.execute("INSERT INTO utenti (username,nome,cognome,ruolo,profilo,hash,sale,ore_giornaliere,argo_utente) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)", (username, nome, cognome, ruolo, "", "", "",
+                                                   0 if ruolo == "docente" else 6, digitato.lower()))
+    notifica_ruoli(c, ["segreteria", "dsga", "dirigente"],
+                   f"Nuovo account creato con Argo: {cognome} {nome} – controlla ruolo e ferie in Personale",
+                   "#/gestione/personale")
+    return c.execute("SELECT * FROM utenti WHERE id=?", (cur.lastrowid,)).fetchone()
+
+
+def nuova_sessione(c, user):
+    tok = secrets.token_urlsafe(32)
+    c.execute("DELETE FROM sessioni WHERE scade<?", (time.time(),))
+    c.execute("INSERT INTO sessioni VALUES (?,?,?)", (tok, user["id"], time.time() + DURATA_SESSIONE))
+    r = Risposta(json.dumps({"ok": True}).encode())
+    r.intestazioni["Set-Cookie"] = (f"sp_sessione={tok}; Path=/; HttpOnly; SameSite=Lax; "
+                                    f"Max-Age={DURATA_SESSIONE}")
+    return r
+
+
+@rotta("GET", "/api/accesso-info", pubblica=True)
+def api_accesso_info(c, u, m, corpo, q, req):
+    imp = impostazioni(c)
+    return {"scuola": imp["scuola"], "argo": imp.get("argo_attivo") == "1"}
 
 
 @rotta("POST", "/api/accesso", pubblica=True)
@@ -697,19 +775,39 @@ def api_accesso(c, u, m, corpo, q, req):
     n, t0 = TENTATIVI.get(ip, (0, 0))
     if n >= 5 and time.time() - t0 < 60:
         raise Errore("Troppi tentativi: riprova tra un minuto.", 429)
-    user = c.execute("SELECT * FROM utenti WHERE username=? AND attivo=1",
-                     (str(corpo.get("username", "")).strip().lower(),)).fetchone()
-    if not user or not password_giusta(str(corpo.get("password", "")), user):
+    nome_ut = str(corpo.get("username", "")).strip()
+    pw = str(corpo.get("password", ""))
+    if corpo.get("modo") == "argo":
+        if impostazioni(c).get("argo_attivo") != "1":
+            raise Errore("L'accesso con Argo non è attivo.", 403)
+        if not nome_ut or not pw:
+            raise Errore("Scrivi nome utente e password di Argo.")
+        chiave = nome_ut.lower()
+        na, ta = TENTATIVI_ARGO.get(chiave, (0, 0))
+        if na >= 3 and time.time() - ta < 900:
+            raise Errore("Tre tentativi non riusciti: aspetta 15 minuti, così Argo non blocca il tuo account.", 429)
+        try:
+            claims = argo.accedi(nome_ut, pw)
+        except argo.ErroreArgo as e:
+            if "non corretti" in str(e):
+                TENTATIVI_ARGO[chiave] = (na + 1 if time.time() - ta < 900 else 1, time.time())
+                TENTATIVI[ip] = (n + 1 if time.time() - t0 < 600 else 1, time.time())
+            raise Errore(str(e), 401)
+        TENTATIVI_ARGO.pop(chiave, None)
+        try:
+            with open(os.path.join(DATI, "argo-campi.json"), "w", encoding="utf-8") as f:
+                json.dump(argo.descrivi_claims(claims), f, indent=1)  # solo i nomi dei campi, per diagnosi
+        except OSError:
+            pass
+        user = utente_da_argo(c, nome_ut, claims)
+        return nuova_sessione(c, user)
+    user = c.execute("SELECT * FROM utenti WHERE username=? AND attivo=1", (nome_ut.lower(),)).fetchone()
+    if not user or not password_giusta(pw, user):
         TENTATIVI[ip] = (n + 1 if time.time() - t0 < 600 else 1, time.time())
-        raise Errore("Nome utente o password non corretti.", 401)
+        raise Errore("Nome utente o password non corretti." + (
+            " Se di solito entri con Argo, scegli «Credenziali Argo»." if user and not user["hash"] else ""), 401)
     TENTATIVI.pop(ip, None)
-    tok = secrets.token_urlsafe(32)
-    c.execute("DELETE FROM sessioni WHERE scade<?", (time.time(),))
-    c.execute("INSERT INTO sessioni VALUES (?,?,?)", (tok, user["id"], time.time() + DURATA_SESSIONE))
-    r = Risposta(json.dumps({"ok": True}).encode())
-    r.intestazioni["Set-Cookie"] = (f"sp_sessione={tok}; Path=/; HttpOnly; SameSite=Lax; "
-                                    f"Max-Age={DURATA_SESSIONE}")
-    return r
+    return nuova_sessione(c, user)
 
 
 @rotta("POST", "/api/esci")
@@ -732,6 +830,8 @@ def api_io(c, u, m, corpo, q, req):
 
 @rotta("POST", "/api/password")
 def api_password(c, u, m, corpo, q, req):
+    if not u["hash"]:
+        raise Errore("Entri con le credenziali Argo: la password si cambia sul portale Argo.")
     if not password_giusta(str(corpo.get("attuale", "")), u):
         raise Errore("La password attuale non è corretta.")
     nuova = str(corpo.get("nuova", ""))
@@ -1018,7 +1118,15 @@ def valori_utente(corpo, nuovo):
             v[k] = x
     if "attivo" in corpo:
         v["attivo"] = 1 if corpo["attivo"] else 0
+    if "argo_utente" in corpo:
+        v["argo_utente"] = str(corpo.get("argo_utente") or "").strip().lower()[:80]
     return v
+
+
+def controlla_argo_unico(c, v, escludi=None):
+    if v.get("argo_utente") and c.execute("SELECT 1 FROM utenti WHERE lower(argo_utente)=? AND id IS NOT ?",
+                                          (v["argo_utente"], escludi)).fetchone():
+        raise Errore("Questo utente Argo è già collegato a un'altra persona.")
 
 
 @rotta("POST", "/api/utenti", ruoli=STAFF)
@@ -1028,10 +1136,15 @@ def api_nuovo_utente(c, u, m, corpo, q, req):
         raise Errore("Solo il dirigente può creare un altro account dirigente.", 403)
     if c.execute("SELECT 1 FROM utenti WHERE username=?", (v["username"],)).fetchone():
         raise Errore("Nome utente già usato.")
+    controlla_argo_unico(c, v)
+    v.setdefault("ore_giornaliere", 6 if v["ruolo"] != "docente" else 0)
+    if corpo.get("solo_argo") and v.get("argo_utente"):
+        v["hash"] = v["sale"] = ""
+        c.execute(f"INSERT INTO utenti ({','.join(v)}) VALUES ({','.join('?' * len(v))})", list(v.values()))
+        return {"ok": True}
     pw = password_nuova()
     v["hash"], v["sale"] = hash_password(pw)
     v["cambia_password"] = 1
-    v.setdefault("ore_giornaliere", 6 if v["ruolo"] != "docente" else 0)
     c.execute(f"INSERT INTO utenti ({','.join(v)}) VALUES ({','.join('?' * len(v))})", list(v.values()))
     return {"ok": True, "password": pw}
 
@@ -1049,6 +1162,7 @@ def api_modifica_utente(c, u, m, corpo, q, req):
     if "username" in v and c.execute("SELECT 1 FROM utenti WHERE username=? AND id<>?",
                                      (v["username"], x["id"])).fetchone():
         raise Errore("Nome utente già usato.")
+    controlla_argo_unico(c, v, x["id"])
     out = {"ok": True}
     if corpo.get("reimposta_password"):
         pw = password_nuova()
@@ -1070,6 +1184,13 @@ def api_impostazioni(c, u, m, corpo, q, req):
             val = str(corpo[k]).strip()[:120]
             if k == "patrono" and val and not re.fullmatch(r"\d{2}-\d{2}", val):
                 raise Errore("Il patrono va scritto come MM-GG (es. 06-24).")
+            if k == "argo_ruolo_nuovi" and val not in ("docente", "ata"):
+                raise Errore("Gli account nuovi da Argo possono essere solo docente o ATA.")
+            if k == "argo_codice_scuola":
+                val = val.upper()
+            if k == "argo_nuovi" and val == "1" and not str(corpo.get("argo_codice_scuola") or
+                                                            impostazioni(c).get("argo_codice_scuola")).strip():
+                raise Errore("Per creare gli account da Argo serve il codice della scuola (es. SC12345).")
             c.execute("UPDATE impostazioni SET valore=? WHERE chiave=?", (val, k))
     return {"ok": True}
 
@@ -1617,10 +1738,39 @@ def main():
     p.add_argument("--demo", action="store_true", help="se il database è vuoto, crea personale e dati di prova")
     p.add_argument("--crea-dirigente", metavar="USERNAME",
                    help="crea il primo account dirigente e scrive la password in dati/primo-accesso.txt")
+    p.add_argument("--attiva-argo", metavar="CODICE_SCUOLA", nargs="?", const="",
+                   help="attiva l'accesso con le credenziali Argo (con il codice scuola, es. SC12345)")
+    p.add_argument("--collega-argo", metavar="UTENTE_ARGO",
+                   help="crea un account che entra con questo utente Argo (vedi --ruolo)")
+    p.add_argument("--ruolo", default="dirigente", choices=list(RUOLI), help="ruolo per --collega-argo")
     a = p.parse_args()
     if a.dati:
         DATI = os.path.abspath(a.dati)
     prepara_db()
+    if a.attiva_argo is not None:
+        with db() as c:
+            c.execute("UPDATE impostazioni SET valore='1' WHERE chiave='argo_attivo'")
+            if a.attiva_argo:
+                c.execute("UPDATE impostazioni SET valore=? WHERE chiave='argo_codice_scuola'", (a.attiva_argo.upper(),))
+        print("Accesso con Argo attivato.")
+    if a.collega_argo:
+        with db() as c:
+            ua = a.collega_argo.strip().lower()
+            x = c.execute("SELECT * FROM utenti WHERE lower(argo_utente)=?", (ua,)).fetchone()
+            if x:
+                c.execute("UPDATE utenti SET ruolo=?, attivo=1 WHERE id=?", (a.ruolo, x["id"]))
+                print(f"Utente Argo già collegato a {x['cognome']} {x['nome']}: ruolo impostato a {a.ruolo}.")
+            else:
+                base = re.sub(r"[^a-z0-9._-]", "", ua)[:36] or "utente"
+                un, i = base, 1
+                while c.execute("SELECT 1 FROM utenti WHERE username=?", (un,)).fetchone():
+                    i += 1
+                    un = f"{base}-{i}"
+                c.execute("INSERT INTO utenti (username,nome,cognome,ruolo,hash,sale,ore_giornaliere,argo_utente) "
+                          "VALUES (?,?,?,?,?,?,?,?)", (un, ua, "(da completare)", a.ruolo, "", "", 0, ua))
+                print(f"Creato l'account per l'utente Argo «{ua}» con ruolo {a.ruolo}: "
+                      "nome e cognome arrivano da Argo al primo accesso.")
+            c.execute("UPDATE impostazioni SET valore='1' WHERE chiave='argo_attivo'")
     if a.demo:
         pw = crea_demo()
         if pw:

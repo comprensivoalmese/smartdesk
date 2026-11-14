@@ -46,6 +46,83 @@ class Client:
             return e.code, json.loads(e.read() or b"{}")
 
 
+def avvia_finto_argo():
+    """Server che imita auth.portaleargo.it / www.portaleargo.it nei passaggi usati da argo.py."""
+    import argo
+    from http.server import BaseHTTPRequestHandler
+    from urllib.parse import parse_qs, urlparse
+
+    persone = {
+        "giulia.r": {"given_name": "GIULIA", "family_name": "RINALDI", "argo": {"codMin": "SC99999"}},
+        "nuovo.doc": {"given_name": "Luca", "family_name": "Verdi", "scuole": ["SC99999"]},
+        "altra.scuola": {"given_name": "Anna", "family_name": "Neri", "scuole": ["SC11111"]},
+        "stefano.argo": {"name": "CONTI STEFANO", "scuole": ["SC99999"]},
+    }
+
+    def jwt(d):
+        b = lambda x: base64.urlsafe_b64encode(json.dumps(x).encode()).rstrip(b"=").decode()
+        return f"{b({'alg': 'none'})}.{b(d)}.firma"
+
+    class Finto(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def manda(self, codice, corpo="", loc=None, tipo="text/html"):
+            self.send_response(codice)
+            if loc:
+                self.send_header("Location", loc)
+            self.send_header("Content-Type", tipo)
+            self.end_headers()
+            self.wfile.write(corpo.encode())
+
+        def modulo(self):
+            return ('<html><form id="loginForm" action="/auth/sso/login" method="post">'
+                    '<input type="hidden" name="challenge" value="abc&amp;1"><input name="username">'
+                    '<input type="password" name="password"><button name="login" value="true">Entra</button></form></html>')
+
+        def do_GET(self):
+            u = urlparse(self.path)
+            if u.path == "/oauth2/auth":
+                q = parse_qs(u.query)
+                ok = q.get("client_id") == [argo.CLIENT_ID] and q.get("code_challenge_method") == ["S256"]
+                return self.manda(302, loc="/login?challenge=abc" if ok else "/errore")
+            if u.path == "/login":
+                return self.manda(200, self.modulo())
+            if u.path == "/consenso-ok":
+                return self.manda(302, loc=argo.RITORNO + "&code=COD-" + parse_qs(u.query)["u"][0])
+            self.manda(404)
+
+        def do_POST(self):
+            corpo = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
+            v = {k: x[0] for k, x in corpo.items()}
+            if self.path == "/auth/sso/login":
+                if v.get("challenge") != "abc&1" or v.get("login") != "true":
+                    return self.manda(400)
+                un = v["username"].lower()
+                srv.tentativi[un] = srv.tentativi.get(un, 0) + 1
+                if un == "con.otp":
+                    return self.manda(200, '<form id="otpForm"></form>')
+                if un in persone and v["password"] == "giusta":
+                    return self.manda(302, loc=f"/consenso-ok?u={un}")
+                return self.manda(200, self.modulo())
+            if self.path == "/oauth2/token":
+                un = v["code"].removeprefix("COD-")
+                if v.get("grant_type") != "authorization_code" or not v.get("code_verifier"):
+                    return self.manda(400)
+                d = {"sub": "id-" + un, "preferred_username": un} | persone[un]
+                return self.manda(200, json.dumps({"access_token": jwt({"scope": "argo"}), "id_token": jwt(d)}),
+                                  tipo="application/json")
+            self.manda(404)
+
+    srv = server.ThreadingHTTPServer(("127.0.0.1", 0), Finto)
+    srv.tentativi = {}
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    argo.AUTH = argo.PORTALE = base
+    argo.RITORNO = base + "/voti/oidc-callback.html?classic"
+    return srv
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="sportello-prova-")
     server.DATI = tmp
@@ -199,6 +276,52 @@ def main():
     controlla(s == 200 and "da_lavorare" in h, "home della segreteria")
     s, _ = doc.chiama("/api/password", {"attuale": pw, "nuova": "breve"})
     controlla(s == 400, "password troppo corta")
+
+    print("Accesso con Argo (finto server Argo)")
+    finto = avvia_finto_argo()
+    controlla(anon.chiama("/api/accesso", {"username": "giulia.r", "password": "giusta", "modo": "argo"})[0] == 403,
+              "Argo disattivato: rifiutato")
+    s, _ = dir_.chiama("/api/impostazioni", {"argo_attivo": "1", "argo_codice_scuola": "sc99999", "argo_nuovi": "0"})
+    controlla(s == 200, "accesso Argo attivato dal dirigente")
+    s, info = anon.chiama("/api/accesso-info")
+    controlla(info["argo"] is True, "la pagina di accesso mostra Argo")
+    g = Client(base)
+    s, e = g.chiama("/api/accesso", {"username": "giulia.r", "password": "sbagliata", "modo": "argo"})
+    controlla(s == 401 and "non corretti" in e["errore"], f"password Argo sbagliata ({e.get('errore')})")
+    s, _ = g.chiama("/api/accesso", {"username": "giulia.r", "password": "giusta", "modo": "argo"})
+    s2, io = g.chiama("/api/io")
+    controlla(s == 200 and io["utente"]["username"] == "g.rinaldi", "riconosciuta per nome e cognome (Rinaldi Giulia)")
+    controlla(io["utente"]["argo_utente"] == "giulia.r", "utente Argo collegato alla scheda")
+    s, e = Client(base).chiama("/api/accesso", {"username": "nuovo.doc", "password": "giusta", "modo": "argo"})
+    controlla(s == 403 and "non è ancora collegato" in e["errore"], "sconosciuto senza creazione automatica: rifiutato")
+    dir_.chiama("/api/impostazioni", {"argo_nuovi": "1", "argo_ruolo_nuovi": "docente"})
+    n1 = Client(base)
+    s, _ = n1.chiama("/api/accesso", {"username": "nuovo.doc", "password": "giusta", "modo": "argo"})
+    s2, io = n1.chiama("/api/io")
+    controlla(s == 200 and io["utente"]["cognome"] == "Verdi" and io["utente"]["solo_argo"], "account creato da Argo")
+    controlla(n1.chiama("/api/password", {"attuale": "x", "nuova": "abcdefghi"})[0] == 400, "niente cambio password per chi entra con Argo")
+    controlla(Client(base).chiama("/api/accesso", {"username": "nuovo.doc", "password": "giusta"})[0] == 401,
+              "chi entra con Argo non ha una password dello Sportello")
+    s, n = seg.chiama("/api/notifiche")
+    controlla(any("creato con Argo" in x["testo"] for x in n["elenco"]), "la segreteria riceve l'avviso del nuovo account")
+    s, e = Client(base).chiama("/api/accesso", {"username": "altra.scuola", "password": "giusta", "modo": "argo"})
+    controlla(s == 403 and "questa scuola" in e["errore"], "persona di un'altra scuola: rifiutata")
+    s, e = Client(base).chiama("/api/accesso", {"username": "con.otp", "password": "giusta", "modo": "argo"})
+    controlla(s == 401 and "OTP" in e["errore"], "account con OTP: messaggio chiaro")
+    s, e = seg.chiama(f"/api/utenti/{conti['id']}", {"argo_utente": "giulia.r"})
+    controlla(s == 400 and "già collegato" in e["errore"], "lo stesso utente Argo non va su due persone")
+    s, _ = seg.chiama(f"/api/utenti/{conti['id']}", {"argo_utente": "stefano.argo"})
+    sc = Client(base)
+    s, _ = sc.chiama("/api/accesso", {"username": "STEFANO.ARGO", "password": "giusta", "modo": "argo"})
+    controlla(s == 200 and sc.chiama("/api/io")[1]["utente"]["username"] == "s.conti", "collegamento dalla scheda (maiuscole ignorate)")
+    controlla(not any(pw_ in open(os.path.join(tmp, "argo-campi.json"), encoding="utf-8").read() for pw_ in ("giusta", "Verdi")),
+              "il file di diagnosi non contiene password né nomi")
+    for _ in range(3):
+        Client(base).chiama("/api/accesso", {"username": "bloccami", "password": "sbagliata", "modo": "argo"})
+    s, e = Client(base).chiama("/api/accesso", {"username": "bloccami", "password": "sbagliata", "modo": "argo"})
+    controlla(s == 429, "dopo 3 errori si aspetta (per non far bloccare l'account Argo)")
+    controlla(finto.tentativi.get("bloccami") == 3, "ad Argo arrivano solo 3 tentativi")
+    finto.shutdown()
 
     print("Calendario")
     controlla(server.pasqua(2027) == dt.date(2027, 3, 28), "Pasqua 2027")
