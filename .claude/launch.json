@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "sportello-demo", "runtimeExecutable": "python", "runtimeArgs": ["server.py", "--porta", "8851", "--dati", "dati-demo", "--demo"], "port": 8851 }
+  ]
+}
