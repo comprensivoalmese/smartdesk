@@ -94,6 +94,8 @@ def avvia_finto_argo():
                 q = parse_qs(u.query)
                 sso = re.search(r"sso=([^;]+)", self.headers.get("Cookie") or "")
                 if q.get("client_id") == [argo.PERSONALE_CLIENT] and q.get("code_challenge_method") == ["S256"]:
+                    if q.get("scope") != ["openid profile"]:  # come Argo: questo client non può chiedere "argo"
+                        return self.manda(302, loc=argo.PERSONALE_RITORNO + "?error=invalid_scope")
                     if sso:  # sessione già aperta: si torna subito con il codice
                         return self.manda(302, loc=argo.PERSONALE_RITORNO + "?code=PCOD-" + sso.group(1) + "&scope=openid")
                     return self.manda(302, loc="/login?challenge=abc")

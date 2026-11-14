@@ -198,7 +198,7 @@ def leggi_personale(op, utente, password):
     verificatore, sfida = _pkce()
     url = AUTH + "/oauth2/auth?" + urllib.parse.urlencode({
         "client_id": PERSONALE_CLIENT, "redirect_uri": PERSONALE_RITORNO, "response_type": "code",
-        "scope": "openid profile argo", "state": secrets.token_urlsafe(16),
+        "scope": "openid profile", "state": secrets.token_urlsafe(16),
         "code_challenge": sfida, "code_challenge_method": "S256"})
     tipo, valore = _segui(op, url, ritorno=PERSONALE_RITORNO)
     if tipo != "codice" and 'id="loginForm"' in valore:
