@@ -20,6 +20,7 @@
   --ok: #4ade80; --ok-soft: rgba(74, 222, 128, .12);
   --warn: #fbbf24; --warn-soft: rgba(251, 191, 36, .12);
   --bad: #fb7185; --bad-soft: rgba(251, 113, 133, .13);
+  --orange: #fb923c; --orange-soft: rgba(251, 146, 60, .14);
   --info: #67e8f9; --info-soft: rgba(34, 211, 238, .12);
   --grey-soft: rgba(255, 255, 255, .07);
   --shadow: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 10px 30px rgba(0, 0, 0, .35);
@@ -50,6 +51,7 @@
   --ok: #15803d; --ok-soft: #dcf5e4;
   --warn: #a16207; --warn-soft: #fdf2d3;
   --bad: #be123c; --bad-soft: #fde4ea;
+  --orange: #c2410c; --orange-soft: #ffedd5;
   --info: #0e7490; --info-soft: #dcf4f9;
   --grey-soft: rgba(29, 20, 56, .06);
   --shadow: 0 1px 2px rgba(60, 30, 120, .06), 0 8px 24px rgba(60, 30, 120, .07);
@@ -459,3 +461,13 @@ tr.cliccabile:hover td { background: var(--primary-soft); }
 .didup-msg .allegato { margin: 0 6px 0 0; padding: 5px 10px; font-size: .84rem; }
 @media (max-width: 860px) { .didup-msg .azioni { justify-content: flex-start; width: 100%; } .didup-msg .azioni .btn { flex: 1; } }
 .pillola[disabled] { opacity: .45; cursor: not-allowed; box-shadow: none; }
+
+/* scadenze: giallo il giorno prima, arancio il giorno stesso, rosso se scaduta (solo se c'è ancora da fare) */
+.elem.scade-domani, .didup-msg.scade-domani { border-color: color-mix(in srgb, var(--warn) 55%, transparent); box-shadow: inset 4px 0 0 var(--warn); background: linear-gradient(90deg, var(--warn-soft), transparent 60%), var(--card); }
+.elem.scade-oggi, .didup-msg.scade-oggi { border-color: color-mix(in srgb, var(--orange) 60%, transparent); box-shadow: inset 4px 0 0 var(--orange); background: linear-gradient(90deg, var(--orange-soft), transparent 60%), var(--card); }
+.elem.scaduta, .didup-msg.scaduta { border-color: color-mix(in srgb, var(--bad) 60%, transparent); box-shadow: inset 4px 0 0 var(--bad); background: linear-gradient(90deg, var(--bad-soft), transparent 60%), var(--card); }
+.chip.scade-domani { background: var(--warn-soft); color: var(--warn); }
+.chip.scade-oggi { background: var(--orange-soft); color: var(--orange); }
+.chip.scaduta { background: var(--bad-soft); color: var(--bad); }
+.avviso.scade-oggi { border-color: var(--orange); color: var(--orange); background: var(--orange-soft); }
+.avviso.scaduta { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }

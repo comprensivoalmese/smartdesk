@@ -1043,18 +1043,28 @@ def allegati_didup(utente_id, pk):
     return [{"nome": n, "url": f"/api/didup/allegato/{chiave_didup(pk)}/{i}"} for i, n in enumerate(nomi)]
 
 
+def data_iso(v):
+    """Data in formato AAAA-MM-GG da '2026-11-20...' o '20/11/2026'."""
+    v = str(v or "")
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", v)
+    if m:
+        return m.group(0)
+    m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", v)
+    return f"{m[3]}-{int(m[2]):02d}-{int(m[1]):02d}" if m else ""
+
+
 def messaggio_didup(x, utente_id):
     ad_rich = any(x.get(k) for k in ("richiestaAd", "docentiAd", "personaleAtaAd", "docentiSingoliAd", "docentiAtaSingoliAd"))
     testo = (x.get("desMessaggio") or x.get("desOggetto") or "").strip()
     return {
         "pk": x.get("pk"), "titolo": testo.split("\n")[0][:200] or "Messaggio", "testo": testo[:4000],
-        "categoria": x.get("desCategoria") or "", "data": str(x.get("datGiorno") or x.get("datPubblicazione") or "")[:10],
+        "categoria": x.get("desCategoria") or "", "data": data_iso(x.get("datGiorno") or x.get("datPubblicazione")),
         "mittente": x.get("desMittente") or "", "n_allegati": x.get("numAllegati") or 0,
         "pv_richiesta": bool(x.get("docentiPv")), "pv_fatta": bool(x.get("docentiPvConfermata")),
         "pv_quando": x.get("dataConfermaPv") or "",
         "ad_richiesta": ad_rich, "ad_fatta": bool(x.get("docentiAdConfermata")),
         "adesione": x.get("flgAdesione") if x.get("docentiAdConfermata") else "",
-        "ad_quando": x.get("dataConfermaAd") or "", "ad_scadenza": str(x.get("datScadenzaAdesione") or "")[:10],
+        "ad_quando": x.get("dataConfermaAd") or "", "ad_scadenza": data_iso(x.get("datScadenzaAdesione")),
         "ad_modificabile": x.get("adesioneModificabile", True) is not False,
         "scaricati": allegati_didup(utente_id, x["pk"]) if x.get("pk") is not None else [],
     }

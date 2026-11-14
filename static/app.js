@@ -59,6 +59,14 @@ function toast(msg, errore = false) {
 const GIORNI = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
 const MESI = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
 const dIso = s => { const [y, m, d] = s.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); };
+// scadenza di un messaggio a cui si deve ancora rispondere: '' | scade-domani | scade-oggi | scaduta
+function livelloScadenza(iso, daFare = true) {
+  if (!iso || !daFare) return '';
+  const g = Math.round((new Date(iso.slice(0, 10) + 'T12:00') - new Date(oggiIso() + 'T12:00')) / 864e5);
+  return g < 0 ? 'scaduta' : g === 0 ? 'scade-oggi' : g === 1 ? 'scade-domani' : '';
+}
+const NOMI_SCADENZA = { 'scade-domani': 'Scade domani', 'scade-oggi': 'Scade oggi', scaduta: 'Scaduta' };
+const chipScadenza = l => l ? `<span class="chip ${l}">${NOMI_SCADENZA[l]}</span>` : '';
 const oggiIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 function fd(s, conGiorno = true) {
   if (!s) return '';
@@ -658,10 +666,11 @@ async function vistaSituazione(c, m, q) {
 
 function elemCircolare(ci) {
   const daLeggere = ci.presa_visione && !ci.letta;
-  return `<a class="elem" href="#/circolare/${ci.id}">
+  const scad = livelloScadenza(ci.adesione && ci.scadenza, !ci.letta);
+  return `<a class="elem ${scad}" href="#/circolare/${ci.id}">
     <span class="ico">${ico('bacheca')}</span>
     <span class="testo"><b>${ci.fonte === 'argo' ? '' : 'n. ' + ci.numero + ' · '}${esc(ci.titolo)}</b><span>${fd(ci.data)} · ${ci.fonte === 'argo' ? 'Argo' + (ci.categoria ? ' – ' + esc(ci.categoria) : '') : esc(DEST[ci.destinatari])}${ci.n_allegati ? ' · 📎' + ci.n_allegati : ''}</span></span>
-    <span class="destra">${daLeggere ? `<span class="chip nonletta">${ci.adesione ? 'Da rispondere' : 'Da leggere'}</span>` : ci.letta ? `<span class="chip letta">${ci.risposta ? esc(ci.risposta) : 'Letta'}</span>` : ''}</span></a>`;
+    <span class="destra">${chipScadenza(scad)}${daLeggere && !scad ? `<span class="chip nonletta">${ci.adesione ? 'Da rispondere' : 'Da leggere'}</span>` : ci.letta ? `<span class="chip letta">${ci.risposta ? esc(ci.risposta) : 'Letta'}</span>` : ''}</span></a>`;
 }
 
 async function vistaBacheca(c, m, q) {
@@ -763,11 +772,12 @@ function elemDidup(x) {
   const pvDaFare = x.pv_richiesta && !x.pv_fatta;
   const scadAd = x.ad_scadenza && x.ad_scadenza < oggiIso();
   const bloccaAd = scadAd || (x.ad_fatta && !x.ad_modificabile);
-  return `<div class="didup-msg ${pvDaFare || (x.ad_richiesta && !x.ad_fatta) ? 'da-fare' : ''}">
+  const scad = livelloScadenza(x.ad_richiesta && x.ad_scadenza, !x.ad_fatta);
+  return `<div class="didup-msg ${pvDaFare || (x.ad_richiesta && !x.ad_fatta) ? 'da-fare' : ''} ${scad}">
     <div class="riga" style="align-items:flex-start;flex-wrap:nowrap">
       <span class="ico">${ico('bacheca')}</span>
       <div class="spazio" style="min-width:0">
-        <b class="tit">${esc(x.titolo)}</b>
+        <b class="tit">${esc(x.titolo)}</b>${scad ? ' ' + chipScadenza(scad) : ''}
         <div class="muted piccolo">${x.data ? fd(x.data) : ''}${x.categoria ? ' · ' + esc(x.categoria) : ''}${x.mittente ? ' · ' + esc(x.mittente) : ''}${x.n_allegati ? ' · 📎 ' + x.n_allegati : ''}</div>
         ${x.testo && x.testo !== x.titolo ? `<details><summary class="piccolo">Testo</summary><div class="testo-circ piccolo">${esc(x.testo)}</div></details>` : ''}
         ${x.scaricati.length ? `<div style="margin-top:8px">${x.scaricati.map(a => `<a class="allegato" href="${a.url}" target="_blank" rel="noopener">${ico('scarica')} ${esc(a.nome)}</a>`).join('')}</div>` : ''}
@@ -791,7 +801,9 @@ async function vistaCircolare(c, m) {
   let azione = '';
   if (ci.adesione) {
     azione = `<div class="card"><h2>La tua risposta</h2>
-      ${ci.scadenza ? `<p class="muted">Rispondi entro ${fd(ci.scadenza)}.${scaduta ? ' <b>Termine scaduto.</b>' : ''}</p>` : ''}
+      ${ci.scadenza ? (() => { const l = livelloScadenza(ci.scadenza, !ci.letta);
+        return l ? `<p class="avviso ${l}">Rispondi entro ${fd(ci.scadenza)}: ${l === 'scaduta' ? '<b>termine scaduto.</b>' : l === 'scade-oggi' ? '<b>scade oggi.</b>' : '<b>scade domani.</b>'}</p>`
+          : `<p class="muted">Rispondi entro ${fd(ci.scadenza)}.${scaduta ? ' <b>Termine scaduto.</b>' : ''}</p>`; })() : ''}
       <div class="riga">${['Aderisco', 'Non aderisco', 'Non ho ancora deciso'].map(rr => `<button class="btn ${ci.risposta === rr ? 'primario' : ''}" data-risp="${rr}" ${scaduta ? 'disabled' : ''}>${rr}</button>`).join('')}</div>
       ${ci.letta ? `<p class="muted piccolo">Risposta inviata ${fdt(ci.quando_letta)}.</p>` : ''}</div>`;
   } else if (ci.presa_visione) {
