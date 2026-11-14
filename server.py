@@ -261,6 +261,11 @@ CREATE TABLE IF NOT EXISTS notifiche (
   id INTEGER PRIMARY KEY, utente_id INTEGER NOT NULL, testo TEXT NOT NULL, link TEXT DEFAULT '',
   quando TEXT NOT NULL, letta INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS impostazioni (chiave TEXT PRIMARY KEY, valore TEXT);
+CREATE TABLE IF NOT EXISTS assenze_argo (
+  id INTEGER PRIMARY KEY, utente_id INTEGER NOT NULL, tipo TEXT DEFAULT '', inizio TEXT NOT NULL,
+  fine TEXT NOT NULL, quantita REAL DEFAULT 0, stato TEXT NOT NULL, descrizione TEXT DEFAULT '',
+  particolarita TEXT DEFAULT '');
+CREATE INDEX IF NOT EXISTS i_ass_argo ON assenze_argo(utente_id, tipo);
 CREATE INDEX IF NOT EXISTS i_rich_ut ON richieste(utente_id);
 CREATE INDEX IF NOT EXISTS i_timb ON timbrature(utente_id, quando);
 CREATE INDEX IF NOT EXISTS i_not ON notifiche(utente_id, letta);
@@ -293,8 +298,9 @@ def prepara_db():
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
         colonne = {r["name"] for r in c.execute("PRAGMA table_info(utenti)")}
-        if "argo_utente" not in colonne:
-            c.execute("ALTER TABLE utenti ADD COLUMN argo_utente TEXT DEFAULT ''")
+        for col in ("argo_utente", "argo_letto", "argo_errore"):
+            if col not in colonne:
+                c.execute(f"ALTER TABLE utenti ADD COLUMN {col} TEXT DEFAULT ''")
         colonne = {r["name"] for r in c.execute("PRAGMA table_info(circolari)")}
         for col in ("fonte", "chiave_esterna", "categoria", "link_esterni"):
             if col not in colonne:
@@ -380,12 +386,81 @@ def elenco_allegati(c, proprietario, rif_id):
 
 # ---------------------------------------------------------------- richieste
 def utilizzo(c, utente_id, tipo, da, a, escludi=None):
-    """Quantità (giorni o ore) usata e in attesa per un tipo, con dal in [da, a]."""
-    righe = c.execute("SELECT stato, quantita FROM richieste WHERE utente_id=? AND tipo=? AND dal>=? AND dal<=?"
-                      " AND id IS NOT ?", (utente_id, tipo, da.isoformat(), a.isoformat(), escludi)).fetchall()
-    usati = sum(r["quantita"] for r in righe if r["stato"] in CONCLUSE_OK)
-    attesa = sum(r["quantita"] for r in righe if r["stato"] in ATTIVE)
+    """Quantità (giorni o ore) usata e in attesa per un tipo, con dal in [da, a].
+    Le assenze lette dal programma della segreteria (assenze_argo) valgono per prime; le richieste dello
+    Sportello si aggiungono solo se lì non c'è già un'assenza o una richiesta negli stessi giorni."""
+    righe = c.execute("SELECT stato, quantita, dal, al FROM richieste WHERE utente_id=? AND tipo=? AND dal>=?"
+                      " AND dal<=? AND id IS NOT ?", (utente_id, tipo, da.isoformat(), a.isoformat(), escludi)).fetchall()
+    esterne = c.execute("SELECT inizio, fine, quantita, stato FROM assenze_argo WHERE utente_id=? AND tipo=?"
+                        " AND inizio>=? AND inizio<=?", (utente_id, tipo, da.isoformat(), a.isoformat())).fetchall()
+
+    def gia_in_argo(r):
+        return any(x["inizio"] <= (r["al"] or r["dal"]) and r["dal"] <= x["fine"] for x in esterne)
+
+    usati = sum(x["quantita"] for x in esterne if x["stato"] == "registrata")
+    attesa = sum(x["quantita"] for x in esterne if x["stato"] == "richiesta")
+    usati += sum(r["quantita"] for r in righe if r["stato"] in CONCLUSE_OK and not gia_in_argo(r))
+    attesa += sum(r["quantita"] for r in righe if r["stato"] in ATTIVE and not gia_in_argo(r))
     return usati, attesa
+
+
+# tipi di assenza del programma della segreteria -> tipologie dello Sportello
+ARGO_PARTICOLARITA = {"MOTPERS": "motivi_personali", "FERIE": "ferie", "ORARIA": "permesso_breve",
+                      "VISMEDORA": "visita_oraria", "ASSISTE104": "l104", "ASSREF104": "l104"}
+ARGO_PAROLE = [("festivit", "festivita"), ("motivi personali", "motivi_personali"), ("ferie", "ferie"),
+               ("permesso breve", "permesso_breve"), ("104", "l104"), ("lutto", "lutto"),
+               ("matrimonio", "matrimonio"), ("concors", "concorsi"), ("congedo parentale", "congedo_parentale"),
+               ("malattia del figlio", "malattia_figlio"), ("malattia figlio", "malattia_figlio"),
+               ("malattia", "malattia"), ("visita", "visita_giornata")]
+ARGO_IN_ATTESA = ("FWD", "DAU", "AUT", "DSG", "REF")  # inoltrata, da autorizzare, autorizzata, vistate
+
+
+def tipo_da_argo(a):
+    tipo = ARGO_PARTICOLARITA.get(a.get("particolarita") or "")
+    if not tipo:
+        testo = (a.get("descrizione") or "").lower()
+        tipo = next((t for parola, t in ARGO_PAROLE if parola in testo), "")
+    if tipo == "visita_giornata" and a.get("oraria"):
+        tipo = "visita_oraria"
+    if tipo and (TIPI[tipo]["unita"] == "ore") != bool(a.get("oraria")):
+        return ""  # unità diversa (es. motivi personali a ore): non si mescola con i giorni
+    return tipo
+
+
+def salva_assenze_argo(c, utente_id, dati):
+    """Salva le assenze e le richieste lette da Argo al momento dell'accesso."""
+    if not isinstance(dati, dict):
+        return
+    if dati.get("errore"):
+        c.execute("UPDATE utenti SET argo_errore=? WHERE id=?", (str(dati["errore"])[:300], utente_id))
+        return
+    imp = impostazioni(c)
+    c.execute("DELETE FROM assenze_argo WHERE utente_id=?", (utente_id,))
+    for a in dati.get("assenze", []):
+        if not a.get("inizio"):
+            continue
+        q = a.get("ore") if a.get("oraria") else a.get("giorni")
+        c.execute("INSERT INTO assenze_argo (utente_id,tipo,inizio,fine,quantita,stato,descrizione,particolarita)"
+                  " VALUES (?,?,?,?,?,?,?,?)", (utente_id, tipo_da_argo(a), a["inizio"], a.get("fine") or a["inizio"],
+                                                q or 0, "registrata", (a.get("descrizione") or "")[:200],
+                                                a.get("particolarita") or ""))
+    for r in dati.get("richieste", []):
+        if r.get("stato") not in ARGO_IN_ATTESA or not r.get("inizio"):
+            continue
+        try:
+            if r.get("oraria"):
+                hh = [re.search(r"\d{1,2}:\d{2}", str(r.get(k) or "")) for k in ("ora_dal", "ora_al")]
+                q = max(0, ora_min(hh[1] and hh[1].group()) - ora_min(hh[0] and hh[0].group())) / 60
+            else:
+                q = giorni_lavorativi(data(r["inizio"]), data(r.get("fine") or r["inizio"]), imp)
+        except Errore:
+            q = 0
+        c.execute("INSERT INTO assenze_argo (utente_id,tipo,inizio,fine,quantita,stato,descrizione,particolarita)"
+                  " VALUES (?,?,?,?,?,?,?,?)", (utente_id, tipo_da_argo(r), r["inizio"], r.get("fine") or r["inizio"],
+                                                q, "richiesta", (r.get("descrizione") or "")[:200],
+                                                r.get("particolarita") or ""))
+    c.execute("UPDATE utenti SET argo_letto=?, argo_errore='' WHERE id=?",
+              (adesso().isoformat(timespec="minutes"), utente_id))
 
 
 def fine_anno(d):
@@ -870,7 +945,7 @@ def api_accesso(c, u, m, corpo, q, req):
         if na >= 3 and time.time() - ta < 900:
             raise Errore("Tre tentativi non riusciti: aspetta 15 minuti, così Argo non blocca il tuo account.", 429)
         try:
-            claims = argo.accedi(nome_ut, pw)
+            claims, personale = argo.accedi(nome_ut, pw, assenze=True)
         except argo.ErroreArgo as e:
             if "non corretti" in str(e):
                 TENTATIVI_ARGO[chiave] = (na + 1 if time.time() - ta < 900 else 1, time.time())
@@ -883,6 +958,14 @@ def api_accesso(c, u, m, corpo, q, req):
         except OSError:
             pass
         user = utente_da_argo(c, nome_ut, claims)
+        salva_assenze_argo(c, user["id"], personale)
+        try:  # per diagnosi: solo esito e quantità, nessun dato personale
+            with open(os.path.join(DATI, "argo-personale.json"), "w", encoding="utf-8") as f:
+                json.dump({"quando": adesso().isoformat(), "errore": personale.get("errore", ""),
+                           "assenze": len(personale.get("assenze", [])),
+                           "richieste": len(personale.get("richieste", []))}, f, indent=1)
+        except OSError:
+            pass
         return nuova_sessione(c, user)
     user = c.execute("SELECT * FROM utenti WHERE username=? AND attivo=1", (nome_ut.lower(),)).fetchone()
     if not user or not password_giusta(pw, user):
@@ -965,7 +1048,15 @@ def api_contatori(c, u, m, corpo, q, req):
     target = u
     if q.get("utente") and u["ruolo"] in STAFF:
         target = c.execute("SELECT * FROM utenti WHERE id=?", (int(q["utente"]),)).fetchone() or u
-    return {"utente": utente_pubblico(target), "anno": nome_anno(), "contatori": contatori(c, target)}
+    da, a = inizio_anno(), fine_anno(oggi())
+    esterne = [dict(x) for x in c.execute(
+        "SELECT tipo, inizio, fine, quantita, stato, descrizione FROM assenze_argo WHERE utente_id=? AND inizio>=?"
+        " AND inizio<=? ORDER BY inizio DESC", (target["id"], da.isoformat(), a.isoformat()))]
+    for x in esterne:
+        x["unita"] = TIPI[x["tipo"]]["unita"] if x["tipo"] in TIPI else "giorni"
+    return {"utente": utente_pubblico(target), "anno": nome_anno(), "contatori": contatori(c, target),
+            "segreteria": {"letto": target["argo_letto"] or "", "errore": target["argo_errore"] or "",
+                           "assenze": esterne}}
 
 
 @rotta("POST", "/api/richieste/anteprima")

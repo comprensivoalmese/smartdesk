@@ -61,6 +61,10 @@ def avvia_finto_argo():
         "tullo.ostilio.sc999990": {},
     }
 
+    a0 = server.inizio_anno().year
+    lun = dt.date.today() + dt.timedelta(days=7 - dt.date.today().weekday())  # prossimo lunedì
+    lunedi = lun.isoformat() if lun <= dt.date(a0 + 1, 6, 1) else f"{a0 + 1}-05-03"
+
     def jwt(d):
         b = lambda x: base64.urlsafe_b64encode(json.dumps(x).encode()).rstrip(b"=").decode()
         return f"{b({'alg': 'none'})}.{b(d)}.firma"
@@ -69,10 +73,12 @@ def avvia_finto_argo():
         def log_message(self, *a):
             pass
 
-        def manda(self, codice, corpo="", loc=None, tipo="text/html"):
+        def manda(self, codice, corpo="", loc=None, tipo="text/html", biscotto=None):
             self.send_response(codice)
             if loc:
                 self.send_header("Location", loc)
+            if biscotto:
+                self.send_header("Set-Cookie", biscotto + "; Path=/")
             self.send_header("Content-Type", tipo)
             self.end_headers()
             self.wfile.write(corpo.encode())
@@ -86,16 +92,55 @@ def avvia_finto_argo():
             u = urlparse(self.path)
             if u.path == "/oauth2/auth":
                 q = parse_qs(u.query)
+                sso = re.search(r"sso=([^;]+)", self.headers.get("Cookie") or "")
+                if q.get("client_id") == [argo.PERSONALE_CLIENT] and q.get("code_challenge_method") == ["S256"]:
+                    if sso:  # sessione già aperta: si torna subito con il codice
+                        return self.manda(302, loc=argo.PERSONALE_RITORNO + "?code=PCOD-" + sso.group(1) + "&scope=openid")
+                    return self.manda(302, loc="/login?challenge=abc")
                 ok = q.get("client_id") == [argo.CLIENT_ID] and q.get("code_challenge_method") == ["S256"]
                 return self.manda(302, loc="/login?challenge=abc" if ok else "/errore")
             if u.path == "/login":
                 return self.manda(200, self.modulo())
             if u.path == "/consenso-ok":
-                return self.manda(302, loc=argo.RITORNO + "&code=COD-" + parse_qs(u.query)["u"][0])
+                un = parse_qs(u.query)["u"][0]
+                return self.manda(302, loc=argo.RITORNO + "&code=COD-" + un, biscotto="sso=" + un)
             self.manda(404)
 
+        def personale(self, grezzo):
+            """Imita il programma Personale: login e ricerche (solo per giulia.r ci sono assenze)."""
+            tok = (self.headers.get("Authorization") or "").removeprefix("Bearer PTOK-")
+            servizio = self.path.removeprefix("/personale/rest/")
+            if servizio == "login":
+                if tok == "nuovo.doc":
+                    return {"success": False, "msg": "Utente non abilitato"}
+                return {"uid": "sess-" + tok, "uidSubAnagrafe": "sub-" + tok,
+                        "annoScolastico": {"datInizio": f"{a0}-09-01", "datFine": f"{a0 + 1}-08-31"}}
+            if self.headers.get("x-auth-token") != "sess-" + tok or self.headers.get("argo-client-type") != "wwp.web":
+                return None
+            filtro = json.loads(grezzo)
+            if filtro.get("uidSubAnagrafe") != "sub-giulia.r":
+                return {"data": []}
+            mp = {"codParticolarita": "MOTPERS", "desDescrizione": "Permesso per motivi personali o familiari",
+                  "codOrariaGiorn": "G", "uid": "S_90_I"}
+            if servizio == "assenza/search":
+                return {"data": [
+                    {"datInizio": f"{a0}-10-13", "datFine": f"{a0}-10-14", "numGiorni": 2, "tipoAssenza": mp},
+                    {"datInizio": f"{a0}-10-20", "datFine": f"{a0}-10-20", "numGiorni": 1,
+                     "tipoAssenza": {"codParticolarita": "FERIE", "desDescrizione": "Ferie", "codOrariaGiorn": "G"}}]}
+            if servizio == "richiestascodip/search":
+                return {"data": [
+                    {"datInizio": lunedi, "datFine": lunedi, "codStato": "FWD", "codParticolarita": "MOTPERS",
+                     "desDescrizione": "Permesso per motivi personali o familiari", "desOrariaGiorn": "G"},
+                    {"datInizio": lunedi, "datFine": lunedi, "codStato": "NUL", "codParticolarita": "MOTPERS",
+                     "desDescrizione": "Permesso per motivi personali o familiari", "desOrariaGiorn": "G"}]}
+            return None
+
         def do_POST(self):
-            corpo = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
+            grezzo = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+            if self.path.startswith("/personale/rest/"):
+                r = self.personale(grezzo)
+                return self.manda(200, json.dumps(r), tipo="application/json") if r is not None else self.manda(401)
+            corpo = parse_qs(grezzo)
             v = {k: x[0] for k, x in corpo.items()}
             if self.path == "/auth/sso/login":
                 if v.get("challenge") != "abc&1" or v.get("login") != "true":
@@ -108,9 +153,13 @@ def avvia_finto_argo():
                     return self.manda(302, loc=f"/consenso-ok?u={un}")
                 return self.manda(200, self.modulo())
             if self.path == "/oauth2/token":
-                un = v["code"].removeprefix("COD-")
                 if v.get("grant_type") != "authorization_code" or not v.get("code_verifier"):
                     return self.manda(400)
+                if v["code"].startswith("PCOD-"):
+                    if v.get("client_id") != argo.PERSONALE_CLIENT:
+                        return self.manda(400)
+                    return self.manda(200, json.dumps({"access_token": "PTOK-" + v["code"][5:]}), tipo="application/json")
+                un = v["code"].removeprefix("COD-")
                 d = {"sub": "id-" + un, "preferred_username": un} | persone[un]
                 return self.manda(200, json.dumps({"access_token": jwt({"scope": "argo"}), "id_token": jwt(d)}),
                                   tipo="application/json")
@@ -122,6 +171,8 @@ def avvia_finto_argo():
     base = f"http://127.0.0.1:{srv.server_port}"
     argo.AUTH = argo.PORTALE = base
     argo.RITORNO = base + "/voti/oidc-callback.html?classic"
+    argo.PERSONALE_RITORNO = base + "/argopersonale/oidc-callback.html"
+    argo.PERSONALE_API = base + "/personale/rest/"
     return srv
 
 
@@ -315,6 +366,27 @@ def main():
     s2, io = g.chiama("/api/io")
     controlla(s == 200 and io["utente"]["username"] == "g.rinaldi", "riconosciuta per nome e cognome (Rinaldi Giulia)")
     controlla(io["utente"]["argo_utente"] == "giulia.r", "utente Argo collegato alla scheda")
+    s, ct = g.chiama("/api/contatori")
+    seg_ = ct.get("segreteria", {})
+    ass = seg_.get("assenze", [])
+    controlla(s == 200 and seg_.get("letto") and not seg_.get("errore"), "assenze lette dal programma della segreteria")
+    controlla(sorted((x["tipo"], x["stato"], x["quantita"]) for x in ass)
+              == [("ferie", "registrata", 1), ("motivi_personali", "registrata", 2), ("motivi_personali", "richiesta", 1)],
+              f"assenze registrate e richiesta in attesa (le annullate no): {[(x['tipo'], x['stato']) for x in ass]}")
+    mp = next(k for k in ct["contatori"] if k["tipo"] == "motivi_personali")
+    controlla(mp["usati"] >= 2 and mp["attesa"] >= 1 and mp["residuo"] <= 0,
+              f"motivi personali: usati {mp['usati']}, in attesa {mp['attesa']}, rimasti {mp['residuo']}")
+    with server.db() as c0:
+        uid_g = io["utente"]["id"]
+        prima = server.utilizzo(c0, uid_g, "motivi_personali", server.inizio_anno(), server.fine_anno(server.oggi()))
+        c0.execute("INSERT INTO richieste (utente_id,tipo,dal,al,quantita,stato,creata,aggiornata) VALUES "
+                   "(?,?,?,?,?,?,?,?)", (uid_g, "motivi_personali", f"{server.inizio_anno().year}-10-14",
+                                         f"{server.inizio_anno().year}-10-14", 1, "autorizzata", "x", "x"))
+        dopo = server.utilizzo(c0, uid_g, "motivi_personali", server.inizio_anno(), server.fine_anno(server.oggi()))
+        c0.execute("DELETE FROM richieste WHERE creata='x'")
+    controlla(prima == dopo, "una richiesta dello Sportello già registrata in segreteria non si conta due volte")
+    controlla(not any(x in open(os.path.join(tmp, "argo-personale.json"), encoding="utf-8").read()
+                      for x in ("giusta", "Rinaldi", "MOTPERS")), "il file di diagnosi delle assenze ha solo i numeri")
     s, e = Client(base).chiama("/api/accesso", {"username": "nuovo.doc", "password": "giusta", "modo": "argo"})
     controlla(s == 403 and "non è ancora collegato" in e["errore"], "sconosciuto senza creazione automatica: rifiutato")
     dir_.chiama("/api/impostazioni", {"argo_nuovi": "1", "argo_ruolo_nuovi": "docente"})
@@ -323,6 +395,9 @@ def main():
     s2, io = n1.chiama("/api/io")
     controlla(s == 200 and io["utente"]["cognome"] == "Verdi" and io["utente"]["solo_argo"], "account creato da Argo")
     controlla(n1.chiama("/api/password", {"attuale": "x", "nuova": "abcdefghi"})[0] == 400, "niente cambio password per chi entra con Argo")
+    s, ct = n1.chiama("/api/contatori")
+    controlla(s == 200 and "non abilitato" in ct["segreteria"]["errore"],
+              f"programma Personale non disponibile: si entra lo stesso e si vede il motivo ({ct['segreteria']['errore']})")
     controlla(Client(base).chiama("/api/accesso", {"username": "nuovo.doc", "password": "giusta"})[0] == 401,
               "chi entra con Argo non ha una password dello Sportello")
     s, n = seg.chiama("/api/notifiche")

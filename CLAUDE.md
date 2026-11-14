@@ -17,3 +17,11 @@ documenti personali, gestione). Creata il 14/11/2026 per Andrea Giorda. Si lavor
   given_name, family_name, full_name, email, preferred_username, cod_min (10), customer_code (7 = SC...), user_type,
   roles, licenses, tenancy, birthdate. Non ancora usati: email, user_type/roles (potrebbero dare docente/ATA). OTP non gestito.
   Non fare tentativi di accesso ad Argo con credenziali dell'utente: rischio di blocco dell'account.
+- Assenze dalla segreteria (14/11): all'accesso Argo, `argo.leggi_personale` usa la stessa sessione SSO per entrare
+  nel programma Personale (client OIDC `ad175860-...`, ritorno `/argopersonale/oidc-callback.html`), poi
+  `POST personale.portaleargo.it/personale/rest/login` (Bearer) -> `uid` (= x-auth-token) e `uidSubAnagrafe`, e in sola
+  lettura `assenza/search` (assenze registrate, numGiorni) e `richiestascodip/search` (richieste, codStato FWD/DAU/AUT...).
+  Salvate in tabella `assenze_argo` (tipo mappato da `codParticolarita`, es. MOTPERS -> motivi_personali, FERIE -> ferie);
+  `utilizzo()` le conta per prime e aggiunge le richieste dello Sportello solo se non si sovrappongono. Se la lettura
+  fallisce l'accesso vale lo stesso (`utenti.argo_errore`, mostrato in Situazione). Endpoint verificati dal browser
+  sulla pagina vera; il passaggio `login` è ricavato dal codice di argopersonale (app.js V.1.50.2).

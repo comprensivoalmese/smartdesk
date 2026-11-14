@@ -571,12 +571,25 @@ async function vistaRichiesta(c, m) {
   });
 }
 
+function notaSegreteria(s, altro) {
+  if (!s) return '';
+  const quando = s.letto ? new Date(s.letto).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '';
+  if (s.errore) return `<p class="avviso">Non è stato possibile leggere le assenze registrate dalla segreteria${quando ? ' (restano i dati del ' + esc(quando) + ')' : ''}: ${esc(s.errore)}.</p>`;
+  if (quando) return `<p class="muted piccolo">Conteggi presi dal programma della segreteria all'ultimo accesso con Argo (${esc(quando)}), più le richieste fatte qui e non ancora registrate.${altro ? '' : ' Si aggiornano a ogni accesso.'}</p>`;
+  return altro ? '' : `<p class="muted piccolo">Per vedere i giorni già registrati dalla segreteria, entra con le credenziali Argo.</p>`;
+}
+
 async function vistaSituazione(c, m, q) {
   const d = await api('/api/contatori' + (q.utente ? '?utente=' + q.utente : ''));
   const altro = d.utente.id !== IO.utente.id;
   c.innerHTML = `<h1>${altro ? 'Situazione di ' + esc(d.utente.nome + ' ' + d.utente.cognome) : 'Situazione ferie e permessi'}</h1>
     <p class="muted">Anno scolastico ${esc(d.anno)}. Le richieste in attesa sono già scalate dal disponibile.</p>
-    <div class="due">${d.contatori.map(barraContatore).join('')}</div>`;
+    ${notaSegreteria(d.segreteria, altro)}
+    <div class="due">${d.contatori.map(barraContatore).join('')}</div>
+    ${d.segreteria.assenze.length ? `<h2 style="margin-top:24px">Registrate dalla segreteria</h2>
+      <div class="card lista">${d.segreteria.assenze.map(x => `<div class="elem"><span class="testo"><b>${esc(x.descrizione || 'Assenza')}</b>
+        <span>${fd(x.inizio)}${x.fine !== x.inizio ? ' – ' + fd(x.fine) : ''} · ${num(x.quantita)} ${x.unita === 'ore' ? 'ore' : x.quantita === 1 ? 'giorno' : 'giorni'}</span></span>
+        <span class="destra"><span class="chip ${x.stato === 'registrata' ? 'letta' : ''}">${x.stato === 'registrata' ? 'Registrata' : 'In attesa'}</span></span></div>`).join('')}</div>` : ''}`;
   // .card + .card aggiunge margine verticale nelle colonne: lo togliamo nella griglia
   $$('.due > .card', c).forEach(x => x.style.marginTop = '0');
 }
