@@ -43,3 +43,16 @@ documenti personali, gestione). Creata il 14/11/2026 per Andrea Giorda. Si lavor
   L'assenza registrata si collega alla richiesta con le stesse date (`assenze_argo.rif`); senza richiesta (inserita
   dalla segreteria) non si annulla, come in Unica. Sessione Personale solo in memoria (`SESSIONI_PERSONALE`).
   Le richieste nate in SmartDesk restano in SmartDesk (la segreteria usa Argo): da decidere se mandarle ad Argo.
+
+## Versione per telefono e tablet (14/11/2026)
+- Pages (workflow `.github/workflows/pages.yml`, costruito da `mobile/costruisci.py`): presentazione con QR
+  https://comprensivoalmese.github.io/smartdesk/ , app PWA in `/app/` (`?prova` = dati finti), `SmartDesk-server.zip`,
+  codice del servizio in `/servizio/` (per reinstallarlo).
+- App: `mobile/app/` (Home contatori, Assenze con annullamento, Bacheca DidUP, Profilo). Indirizzo del servizio in `mobile/app/config.js`.
+- Servizio Google: progetto Apps Script **"SmartDesk servizio"** dell'account **autorizzazioni@comprensivoalmese.it**
+  (ID 1VqaU5mu1jAjeq2DBFGITj8BNCXDs-R5Wp7hRqIKvwFnFCuK6w1sT9NEf), web app "esegui come me", accesso "Chiunque",
+  deployment "SmartDesk mobile v1". Codice = `mobile/script/Codice.gs`. Per aggiornarlo: incollare il codice (dal
+  browser integrato: `fetch` da `/servizio/Codice.gs.txt` su Pages e `monaco.editor.getModels()[0].setValue`; localhost
+  e appunti non funzionano), salvare, Gestisci deployment > modifica > Nuova versione (l'URL /exec resta lo stesso).
+- Password mai salvata; sessione in CacheService 6 h; solo utenti .SC15290; 3 errori = 15 min di attesa.
+- Collaudato solo senza credenziali (pagina di accesso Argo raggiungibile, CORS OK da Pages). Il primo accesso vero lo fa l'utente.

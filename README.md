@@ -43,6 +43,12 @@ Il server deve avere internet.
 - Diagnosi: dopo ogni accesso Argo riuscito `dati\argo-campi.json` elenca i **nomi** dei campi ricevuti da Argo (senza i
   valori). Serve a capire se Argo manda nome, cognome e codice scuola.
 
+## Da telefono e tablet
+
+Pagina pubblica: https://comprensivoalmese.github.io/smartdesk/ (QR e istruzioni per installarla come app).
+L'app per telefono (`mobile/app`) entra in Argo attraverso un servizio Google Apps Script della scuola
+(`mobile/script/Codice.gs`): la password serve solo per entrare e non viene salvata.
+
 ## Che cosa fa
 
 **Per tutto il personale**
