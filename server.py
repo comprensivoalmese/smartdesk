@@ -734,15 +734,22 @@ def utente_da_argo(c, digitato, claims):
         raise Errore("Le credenziali Argo sono giuste, ma il tuo account non è ancora collegato allo Sportello: "
                      "chiedi alla segreteria di inserire il tuo nome utente Argo nella tua scheda.", 403)
     codice = imp.get("argo_codice_scuola", "").strip().upper()
-    if not codice or not any(codice in t for t in idn["testi"]):
+    if idn["codice_da_utente"]:
+        della_scuola = idn["codice_da_utente"] == codice
+    else:
+        della_scuola = bool(codice) and any(codice in t for t in idn["testi"])
+    if not codice or not della_scuola:
         raise Errore("Non risulti tra il personale di questa scuola: chiedi alla segreteria di collegare il tuo "
                      "account Argo.", 403)
+    primo = not c.execute("SELECT 1 FROM utenti WHERE ruolo IN ('segreteria','dsga','dirigente') AND attivo=1").fetchone()
     base = re.sub(r"[^a-z0-9._-]", "", digitato.lower())[:36] or "utente"
     username, i = base, 1
     while c.execute("SELECT 1 FROM utenti WHERE username=?", (username,)).fetchone():
         i += 1
         username = f"{base}-{i}"
     ruolo = imp.get("argo_ruolo_nuovi") if imp.get("argo_ruolo_nuovi") in ("docente", "ata") else "docente"
+    if primo:  # nessun amministratore ancora: il primo che entra con Argo gestisce lo Sportello
+        ruolo = "dirigente"
     nome, cognome = idn["nome"] or digitato, idn["cognome"] or "(da completare)"
     cur = c.execute("INSERT INTO utenti (username,nome,cognome,ruolo,profilo,hash,sale,ore_giornaliere,argo_utente) "
                     "VALUES (?,?,?,?,?,?,?,?,?)", (username, nome, cognome, ruolo, "", "", "",
@@ -1743,6 +1750,8 @@ def main():
     p.add_argument("--collega-argo", metavar="UTENTE_ARGO",
                    help="crea un account che entra con questo utente Argo (vedi --ruolo)")
     p.add_argument("--ruolo", default="dirigente", choices=list(RUOLI), help="ruolo per --collega-argo")
+    p.add_argument("--argo-nuovi", action="store_true",
+                   help="chi entra con Argo e non ha ancora un account lo riceve subito (serve --attiva-argo CODICE)")
     a = p.parse_args()
     if a.dati:
         DATI = os.path.abspath(a.dati)
@@ -1752,6 +1761,8 @@ def main():
             c.execute("UPDATE impostazioni SET valore='1' WHERE chiave='argo_attivo'")
             if a.attiva_argo:
                 c.execute("UPDATE impostazioni SET valore=? WHERE chiave='argo_codice_scuola'", (a.attiva_argo.upper(),))
+            if a.argo_nuovi:
+                c.execute("UPDATE impostazioni SET valore='1' WHERE chiave='argo_nuovi'")
         print("Accesso con Argo attivato.")
     if a.collega_argo:
         with db() as c:

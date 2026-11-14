@@ -57,6 +57,8 @@ def avvia_finto_argo():
         "nuovo.doc": {"given_name": "Luca", "family_name": "Verdi", "scuole": ["SC99999"]},
         "altra.scuola": {"given_name": "Anna", "family_name": "Neri", "scuole": ["SC11111"]},
         "stefano.argo": {"name": "CONTI STEFANO", "scuole": ["SC99999"]},
+        "anco.marzio.sc99999": {},
+        "tullo.ostilio.sc999990": {},
     }
 
     def jwt(d):
@@ -304,6 +306,13 @@ def main():
               "chi entra con Argo non ha una password dello Sportello")
     s, n = seg.chiama("/api/notifiche")
     controlla(any("creato con Argo" in x["testo"] for x in n["elenco"]), "la segreteria riceve l'avviso del nuovo account")
+    am = Client(base)
+    s, _ = am.chiama("/api/accesso", {"username": "Anco.Marzio.SC99999", "password": "giusta", "modo": "argo"})
+    io = am.chiama("/api/io")[1]["utente"] if s == 200 else {}
+    controlla(io.get("nome") == "Anco" and io.get("cognome") == "Marzio" and io.get("ruolo") == "docente",
+              f"nome.cognome.CODICE: account creato con nome e cognome dal nome utente ({io.get('nome')} {io.get('cognome')})")
+    s, e = Client(base).chiama("/api/accesso", {"username": "tullo.ostilio.SC999990", "password": "giusta", "modo": "argo"})
+    controlla(s == 403, "codice scuola nel nome utente diverso (SC999990): rifiutato")
     s, e = Client(base).chiama("/api/accesso", {"username": "altra.scuola", "password": "giusta", "modo": "argo"})
     controlla(s == 403 and "questa scuola" in e["errore"], "persona di un'altra scuola: rifiutata")
     s, e = Client(base).chiama("/api/accesso", {"username": "con.otp", "password": "giusta", "modo": "argo"})
@@ -321,6 +330,17 @@ def main():
     s, e = Client(base).chiama("/api/accesso", {"username": "bloccami", "password": "sbagliata", "modo": "argo"})
     controlla(s == 429, "dopo 3 errori si aspetta (per non far bloccare l'account Argo)")
     controlla(finto.tentativi.get("bloccami") == 3, "ad Argo arrivano solo 3 tentativi")
+    vuoto = tempfile.mkdtemp(prefix="sportello-vuoto-")
+    vecchio, server.DATI = server.DATI, vuoto
+    server.prepara_db()
+    with server.db() as c0:
+        c0.execute("UPDATE impostazioni SET valore='1' WHERE chiave IN ('argo_attivo','argo_nuovi')")
+        c0.execute("UPDATE impostazioni SET valore='SC99999' WHERE chiave='argo_codice_scuola'")
+        p1 = server.utente_da_argo(c0, "anco.marzio.SC99999", {})
+        p2 = server.utente_da_argo(c0, "tullo.ostilio.sc99999", {})
+    controlla(p1["ruolo"] == "dirigente" and p2["ruolo"] == "docente",
+              "database vuoto: il primo che entra con Argo è amministratore, gli altri no")
+    server.DATI = vecchio
     finto.shutdown()
 
     print("Calendario")

@@ -161,6 +161,7 @@ async function mostraAccesso() {
     $$('[data-modo]', f).forEach(b => b.classList.toggle('attiva', b.dataset.modo === m));
     $('#acc-spiega').textContent = m === 'argo' ? 'Usa lo stesso nome utente e la stessa password del portale Argo. Lo Sportello li controlla con Argo e non salva la password.' : '';
     $('#acc-utente').textContent = m === 'argo' ? 'Nome utente Argo' : 'Nome utente';
+    f.username.placeholder = m === 'argo' ? 'nome.cognome.SC12345' : '';
     $('#acc-aiuto').textContent = m === 'argo' ? 'Password Argo dimenticata? Si recupera dal portale Argo.' : 'Password dimenticata? Chiedi alla segreteria del personale di reimpostarla.';
     $('#acc-errore').innerHTML = '';
   };

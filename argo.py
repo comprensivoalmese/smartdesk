@@ -154,12 +154,18 @@ def identita(claims, utente):
         parti = completo.split()
         if len(parti) >= 2:
             cognome, nome = cognome or parti[0], nome or " ".join(parti[1:])
+    # nome utente Argo del personale: nome.cognome.SC12345 (es. anco.marzio.SC15290)
+    m = re.fullmatch(r"([^.]+)\.(.+)\.(sc\w+)", utente.strip(), re.I)
+    if m and (not nome or not cognome):
+        nome = nome or m.group(1).replace("_", " ").replace("-", " ").title()
+        cognome = cognome or m.group(2).replace(".", " ").replace("_", " ").title()
     return {
         "nome": nome.title() if nome.isupper() else nome,
         "cognome": cognome.title() if cognome.isupper() else cognome,
         "username": (primo("preferred_username", "username") or utente).lower(),
         "sub": primo("sub"),
         "testi": [t.upper() for t in _testi(claims)] + [utente.upper()],
+        "codice_da_utente": m.group(3).upper() if m else "",
     }
 
 

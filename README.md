@@ -26,9 +26,12 @@ Il personale entra con lo stesso nome utente e la stessa password del portale Ar
 accesso del sito Argo (auth.portaleargo.it), controlla che le credenziali siano giuste e **non salva la password**.
 Il server deve avere internet.
 
-- **Prima prova**: doppio clic su `prova-argo.bat`. Chiede il tuo nome utente Argo e il codice della scuola, poi crea il
-  tuo account (ruolo dirigente, per vedere anche la Gestione), attiva Argo e apre lo Sportello: scegli «Credenziali Argo».
-  Equivale a `python server.py --attiva-argo SC15290 --collega-argo <utente> --ruolo dirigente`.
+- **Avvio**: doppio clic su `avvia.bat` (= `python server.py --porta 8850 --attiva-argo SC15290 --argo-nuovi`).
+  Si entra con «Credenziali Argo» e il nome utente nel formato `nome.cognome.SC15290`: nome, cognome e scuola si leggono
+  da lì. Chi ha credenziali Argo valide di SC15290 riceve l'account al primo accesso, senza registrazione.
+  **Il primo in assoluto diventa amministratore** (ruolo dirigente, vede la Gestione); gli altri entrano come docenti e
+  la segreteria corregge il ruolo in Gestione › Personale.
+- Per collegare a mano un utente Argo con un ruolo: `python server.py --collega-argo nome.cognome.SC15290 --ruolo segreteria`.
 - Come si riconosce chi entra: 1) dal campo «Utente Argo» della sua scheda in Gestione › Personale; 2) altrimenti da nome
   e cognome che arrivano da Argo (se c'è una sola persona con quel nome, la scheda si collega da sola); 3) altrimenti, se
   in Impostazioni è attiva «Crea l'account al primo accesso», si crea un account nuovo (docente o ATA) e la segreteria
