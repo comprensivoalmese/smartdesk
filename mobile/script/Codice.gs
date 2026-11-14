@@ -180,14 +180,14 @@ function motivoPagina(html) {
 }
 
 function pkce() {
-  var v = Utilities.base64EncodeWebSafe(Utilities.getUUID() + Utilities.getUUID()).replace(/=+$/, '');
+  var v = Utilities.base64EncodeWebSafe(Utilities.getUuid() + Utilities.getUuid()).replace(/=+$/, '');
   var sfida = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, v, Utilities.Charset.US_ASCII)).replace(/=+$/, '');
   return { verificatore: v, sfida: sfida };
 }
 
 function urlAuth(client, ritorno, scope, sfida) {
   var q = { client_id: client, redirect_uri: ritorno, response_type: 'code', scope: scope,
-            state: Utilities.getUUID(), code_challenge: sfida, code_challenge_method: 'S256' };
+            state: Utilities.getUuid(), code_challenge: sfida, code_challenge_method: 'S256' };
   return AUTH + '/oauth2/auth?' + Object.keys(q).map(function (k) { return k + '=' + encodeURIComponent(q[k]); }).join('&');
 }
 
@@ -241,7 +241,7 @@ function azioneAccedi(c) {
   catch (err) { out.personale_errore = err.message || String(err); }
   try { s.didup = apriDidup(tok.access_token); }
   catch (err) { out.didup_errore = err.message || String(err); }
-  var id = Utilities.getUUID().replace(/-/g, '') + Utilities.getUUID().replace(/-/g, '');
+  var id = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
   s.id = id;
   if (s.personale) {
     try { out.dati = leggiPersonale(s); } catch (err) { out.personale_errore = err.message || String(err); }
