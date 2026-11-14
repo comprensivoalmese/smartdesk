@@ -12,6 +12,8 @@ documenti personali, gestione). Creata il 14/11/2026 per Andrea Giorda. Si lavor
 - Non usare nomi o marchi Argo nell'interfaccia (a parte "Credenziali Argo" per l'accesso).
 - Accesso Argo (14/11): `argo.py` (OIDC come Documents\assenze-argo, solo stdlib, password mai salvata), impostazioni
   `argo_*`, colonna `utenti.argo_utente`, account "solo Argo" = hash vuoto. Collaudato con un finto Argo in prova_api.py
-  e verificato che la pagina vera di Argo ha ancora il modulo `loginForm`. **Mai provato con credenziali vere**: lo fa
-  l'utente con `avvia.bat` (Argo attivo, SC15290, account creati al primo accesso; il primo è dirigente). Ignoti: quali claims manda Argo (vedi `dati\argo-campi.json`), OTP non gestito.
+  e verificato che la pagina vera di Argo ha ancora il modulo `loginForm`. **Provato con credenziali vere il 14/11: funziona**
+  (`avvia.bat`: Argo attivo, SC15290, account creati al primo accesso; il primo, Andrea, è dirigente). Claims ricevuti:
+  given_name, family_name, full_name, email, preferred_username, cod_min (10), customer_code (7 = SC...), user_type,
+  roles, licenses, tenancy, birthdate. Non ancora usati: email, user_type/roles (potrebbero dare docente/ATA). OTP non gestito.
   Non fare tentativi di accesso ad Argo con credenziali dell'utente: rischio di blocco dell'account.
