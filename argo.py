@@ -177,15 +177,15 @@ def accedi(utente, password, assenze=False):
 
 
 # ---------------------------------------------------------------- programma Personale (sola lettura)
-def _json(url, corpo=None, intestazioni=None, chi="il programma Personale", referer="/argopersonale/"):
-    """POST JSON a un servizio Argo (programma Personale o DidUP)."""
+def _json(url, corpo=None, intestazioni=None, chi="il programma Personale", referer="/argopersonale/", metodo="POST"):
+    """POST (o PUT) JSON a un servizio Argo (programma Personale o DidUP)."""
     h = {"User-Agent": AGENTE, "Accept": "application/json", "Origin": PORTALE, "Referer": PORTALE + referer}
     if corpo is not None:
         h["Content-Type"] = "application/json"
     h.update(intestazioni or {})
     dati = json.dumps(corpo).encode() if corpo is not None else b""
-    req = urllib.request.Request(url, data=dati, headers=h, method="POST")
-    servizio = url.rsplit("/rest/", 1)[-1]
+    req = urllib.request.Request(url, data=dati, headers=h, method=metodo)
+    servizio = url.rsplit("/rest/", 1)[-1].split("?")[0]
     try:
         with urllib.request.urlopen(req, timeout=25) as r:
             return json.loads(r.read().decode("utf-8", "replace") or "{}")
@@ -301,7 +301,9 @@ def leggi_personale(op, utente, password):
         richieste = _json(PERSONALE_API + "richiestascodip/search", {"stato": "-1"} | filtro, h)
     except ErroreArgo:
         richieste = {"data": []}
-    out = {"dal": dal, "al": al, "assenze": [], "richieste": []}
+    # la sessione serve (solo in memoria) per chiedere l'annullamento come fa Unica
+    out = {"dal": dal, "al": al, "assenze": [], "richieste": [],
+           "sessione": {"token": token, "uid": sessione["uid"], "scade": _jwt(token).get("exp") or 0}}
     for a in registrate.get("data") or []:
         t = a.get("tipoAssenza") or {}
         out["assenze"].append({
@@ -316,8 +318,54 @@ def leggi_personale(op, utente, password):
             "stato": r.get("codStato") or "", "particolarita": r.get("codParticolarita") or "",
             "codice": r.get("uidTipoAssenza") or "", "descrizione": r.get("desDescrizione") or "",
             "oraria": r.get("desOrariaGiorn") == "O",
-            "ora_dal": r.get("datPermOraDal") or "", "ora_al": r.get("datPermOraAl") or ""})
+            "ora_dal": r.get("datPermOraDal") or "", "ora_al": r.get("datPermOraAl") or "",
+            # i dati che Unica rimanda indietro per annullare la richiesta
+            "rif": {"uid": r.get("uid"), "desNote": r.get("desNote"), "prgReferente": r.get("prgReferente"),
+                    "uidAssenzaDef": r.get("uidAssenzaDef")} if r.get("uid") else None})
     return out
+
+
+def _personale_h(s):
+    return {"Authorization": "Bearer " + s["token"], "x-auth-token": s["uid"],
+            "argo-client-version": PERSONALE_VERSIONE, "argo-client-type": "wwp.web"}
+
+
+def annulla_richiesta_personale(s, rif, motivo):
+    """Chiede l'annullamento di una richiesta di assenza già inoltrata o formalizzata, come il pulsante
+    «Annulla» di Unica / Argo Personale (PUT richiestascodip/annulla/fwd con il motivo, max 250 caratteri)."""
+    corpo = {"uid": rif["uid"], "desNote": rif.get("desNote"), "prgReferente": rif.get("prgReferente"),
+             "uidAssenzaDef": rif.get("uidAssenzaDef"), "desNoteAnnullamento": motivo[:250]}
+    r = _json(PERSONALE_API + "richiestascodip/annulla/fwd", corpo, _personale_h(s), metodo="PUT")
+    if r.get("success") is False:
+        raise ErroreArgo("il programma Personale non ha accettato l'annullamento"
+                         + (f": {r.get('msg')}" if r.get("msg") else ""))
+    return r.get("msg") or ""
+
+
+def allega_richiesta_personale(s, uid_richiesta, nome, dati, mime="application/octet-stream"):
+    """Aggiunge un allegato del dipendente alla richiesta (come il caricamento di Argo Personale)."""
+    confine = "----SmartDesk" + secrets.token_hex(12)
+    sicuro = re.sub(r'[\r\n"]', "_", nome)
+    testa = (f"--{confine}\r\nContent-Disposition: form-data; name=\"{sicuro}\"; filename=\"{sicuro}\"\r\n"
+             f"Content-Type: {mime}\r\n\r\n")
+    corpo = testa.encode() + dati + f"\r\n--{confine}--\r\n".encode()
+    h = _personale_h(s) | {"User-Agent": AGENTE, "Accept": "text/plain", "Origin": PORTALE,
+                           "Referer": PORTALE + "/argopersonale/", "Content-Type": f"multipart/form-data; boundary={confine}",
+                           "X-File-Name": base64.b64encode(nome.encode()).decode(), "X-Filename-Encoder": "base64",
+                           "X-File-Size": str(len(dati)), "X-File-Type": mime}
+    url = PERSONALE_API + "richiestasco/uploadallegato?" + urllib.parse.urlencode({"uidRichiesta": uid_richiesta, "autore": "DIP"})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=corpo, headers=h, method="POST"), timeout=60) as r:
+            testo = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        raise ErroreArgo(f"allegato «{nome}» non caricato (il programma Personale ha risposto {e.code})")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise ErroreArgo("il programma Personale non è raggiungibile")
+    try:
+        if json.loads(testo or "{}").get("success") is False:
+            raise ErroreArgo(f"allegato «{nome}» non accettato dal programma Personale")
+    except ValueError:
+        pass
 
 
 # ---------------------------------------------------------------- lettura dei dati dell'identità

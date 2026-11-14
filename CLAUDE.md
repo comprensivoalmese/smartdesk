@@ -20,7 +20,7 @@ documenti personali, gestione). Creata il 14/11/2026 per Andrea Giorda. Si lavor
 - Porte: 8850 uso vero, 8851 demo (`--dati dati-demo --demo`). Voce "sportello-personale" nel launch.json del progetto audio.
 - Collaudo: `python prova_api.py` (deve dire TUTTO OK).
 - Password: mai in chat. Demo in `dati-demo\credenziali-demo.txt`, primo dirigente in `dati\primo-accesso.txt`.
-- **Niente push su GitHub** (regola dell'utente per i progetti nuovi): solo commit locali.
+- GitHub: repo comprensivoalmese/smartdesk (push chiesto dall'utente il 14/11). `dati/` e `dati-demo/` mai su git.
 - Non usare nomi o marchi Argo nell'interfaccia (a parte "Credenziali Argo" per l'accesso).
 - Accesso Argo (14/11): `argo.py` (OIDC come Documents\assenze-argo, solo stdlib, password mai salvata), impostazioni
   `argo_*`, colonna `utenti.argo_utente`, account "solo Argo" = hash vuoto. Collaudato con un finto Argo in prova_api.py
@@ -36,4 +36,10 @@ documenti personali, gestione). Creata il 14/11/2026 per Andrea Giorda. Si lavor
   Salvate in tabella `assenze_argo` (tipo mappato da `codParticolarita`, es. MOTPERS -> motivi_personali, FERIE -> ferie);
   `utilizzo()` le conta per prime e aggiunge le richieste dello Sportello solo se non si sovrappongono. Se la lettura
   fallisce l'accesso vale lo stesso (`utenti.argo_errore`, mostrato in Situazione). Endpoint verificati dal browser
-  sulla pagina vera; il passaggio `login` è ricavato dal codice di argopersonale (app.js V.1.50.2).
+  sulla pagina vera; il passaggio `login` è ricavato dal codice di argopersonale (app.js V.1.50.2).- Annullamenti (14/11): `POST /api/assenze-segreteria/annulla` manda l'annullamento al programma Personale come Unica:
+  PUT `richiestascodip/annulla/fwd` {uid, desNote, prgReferente, uidAssenzaDef, desNoteAnnullamento (max 250)}, poi gli
+  allegati con POST multipart `richiestasco/uploadallegato?uidRichiesta=..&autore=DIP` (header X-File-Name base64,
+  X-Filename-Encoder, X-File-Size, X-File-Type). Ricavato da argopersonale app.js, provato solo col finto Argo.
+  L'assenza registrata si collega alla richiesta con le stesse date (`assenze_argo.rif`); senza richiesta (inserita
+  dalla segreteria) non si annulla, come in Unica. Sessione Personale solo in memoria (`SESSIONI_PERSONALE`).
+  Le richieste nate in SmartDesk restano in SmartDesk (la segreteria usa Argo): da decidere se mandarle ad Argo.

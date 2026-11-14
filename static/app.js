@@ -424,9 +424,11 @@ function assenzeSoloSegreteria(assenze, richieste) {
 function elemAssenzaSegreteria(x) {
   const q = `${num(x.quantita)} ${x.unita === 'ore' ? 'ore' : x.quantita === 1 ? 'giorno' : 'giorni'}`;
   const r = x.richiesta;
-  const destra = r && r.stato === 'annullamento' ? `<a class="chip annullamento" href="#/richiesta/${r.id}">Annullamento richiesto</a>`
-    : r && r.stato === 'annullata' ? `<a class="chip letta" href="#/richiesta/${r.id}">Annullata: da togliere in segreteria</a>`
-    : x.stato === 'registrata' ? `<button class="btn mini pericolo" data-annulla-seg="${x.id}" data-cosa="${esc((x.descrizione || 'Assenza') + ' del ' + fd(x.inizio))}">Chiedi l'annullamento</button>`
+  const bottone = testo => `<button class="btn mini pericolo" data-annulla-seg="${x.id}" data-cosa="${esc((x.descrizione || 'Assenza') + ' del ' + fd(x.inizio))}">${testo}</button>`;
+  const destra = r && r.stato === 'annullamento' && r.inviata ? `<a class="chip annullamento" href="#/richiesta/${r.id}">Annullamento inviato</a>`
+    : r && r.stato === 'annullata' ? `<a class="chip letta" href="#/richiesta/${r.id}">Annullata</a>`
+    : x.annullabile ? bottone(r && r.stato === 'annullamento' ? 'Invia l\'annullamento' : 'Chiedi l\'annullamento')
+    : x.stato === 'registrata' ? '<span class="chip" title="Inserita dalla segreteria senza una tua richiesta: chiedi alla segreteria">Inserita dalla segreteria</span>'
     : '<span class="chip">In attesa</span>';
   return `<div class="elem"><span class="ico">${ico('richieste')}</span><span class="testo"><b>${esc(x.descrizione || 'Assenza')}</b>
     <span>${fd(x.inizio)}${x.fine !== x.inizio ? ' – ' + fd(x.fine) : ''} · ${q} · registrata dalla segreteria</span></span>
@@ -434,17 +436,27 @@ function elemAssenzaSegreteria(x) {
 }
 
 function collegaAnnullaSegreteria(c) {
-  $$('[data-annulla-seg]', c).forEach(b => b.onclick = async () => {
-    const ris = await chiedi({
-      titolo: "Chiedi l'annullamento", nota: true, notaObbligatoria: true, bottone: "Chiedi l'annullamento", pericolo: true,
-      testo: `${b.dataset.cosa}. La richiesta va alla segreteria: quando la conferma, i giorni tornano disponibili.`,
-    });
-    if (!ris) return;
-    try {
-      const r = await api('/api/assenze-segreteria/annulla', { id: +b.dataset.annullaSeg, nota: ris.nota });
-      toast('Richiesta di annullamento inviata alla segreteria.');
-      location.hash = '#/richiesta/' + r.id;
-    } catch (err) { toast(err.message, true); }
+  $$('[data-annulla-seg]', c).forEach(b => b.onclick = () => {
+    const f = finestra(`<h2>Chiedi l'annullamento</h2>
+      <p class="muted">${esc(b.dataset.cosa)}. Come in Unica, l'annullamento arriva alla segreteria con il motivo e gli allegati; quando lo registra, i giorni tornano disponibili.</p>
+      <label class="campo"><span>Motivo dell'annullamento <small class="muted" id="an-conta">0/250</small></span><textarea id="an-nota" maxlength="250"></textarea></label>
+      <label class="campo"><span>Allegati (facoltativi, fino a 5)</span><input type="file" id="an-file" multiple></label>
+      <div class="piede"><button class="btn" data-chiudi>Indietro</button><button class="btn pericolo" id="an-ok">Invia l'annullamento</button></div>`);
+    const nota = $('#an-nota', f.el);
+    nota.oninput = () => { $('#an-conta', f.el).textContent = `${nota.value.length}/250`; };
+    $('#an-ok', f.el).onclick = async e => {
+      const motivo = nota.value.trim();
+      if (!motivo) { toast("Scrivi il motivo dell'annullamento.", true); return; }
+      const files = [...$('#an-file', f.el).files];
+      if (files.length > 5) { toast('Al massimo 5 allegati.', true); return; }
+      e.target.disabled = true; e.target.textContent = 'Invio…';
+      try {
+        const r = await api('/api/assenze-segreteria/annulla', { id: +b.dataset.annullaSeg, nota: motivo, allegati: await Promise.all(files.map(leggiFile)) });
+        f.chiudi();
+        toast(r.allegati_non_caricati?.length ? `Annullamento inviato, ma ${r.allegati_non_caricati.length} allegati non sono arrivati: ${r.allegati_non_caricati[0]}` : 'Annullamento inviato alla segreteria.', !!r.allegati_non_caricati?.length);
+        location.hash = '#/richiesta/' + r.id;
+      } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = "Invia l'annullamento"; }
+    };
   });
 }
 
@@ -587,6 +599,9 @@ async function vistaRichiesta(c, m) {
   if (r.dal) dati.push([t.unita === 'ore' ? 'Quando' : 'Periodo', periodo(r)], ['Durata', quantita(r)]);
   t.campi.forEach(f => { if (r.campi[f.id]) dati.push([f.etichetta, f.tipo === 'date' ? fd(r.campi[f.id], false) : r.campi[f.id]]); });
   if (r.campi.origine === 'segreteria') dati.push(['Assenza', r.campi.assenza + ' (registrata dalla segreteria)']);
+  const motivoAnn = r.campi.motivo || [...r.storico].reverse().find(s => s.azione === 'chiedi_annullamento')?.nota;
+  if (['annullamento', 'annullata'].includes(r.stato) && motivoAnn) dati.push(['Motivo dell\'annullamento', motivoAnn]);
+  if (r.campi.inviata_argo) dati.push(['Dove', 'Inviato al programma della segreteria (lo vedi anche in Unica)']);
   if (r.note) dati.push(['Note', r.note]);
   dati.push([r.campi.origine === 'segreteria' ? 'Annullamento chiesto' : 'Inviata', fdt(r.creata)]);
   const puoAllegare = (mia || IO.staff) && !['annullata'].includes(r.stato);

@@ -271,7 +271,7 @@ CREATE TABLE IF NOT EXISTS impostazioni (chiave TEXT PRIMARY KEY, valore TEXT);
 CREATE TABLE IF NOT EXISTS assenze_argo (
   id INTEGER PRIMARY KEY, utente_id INTEGER NOT NULL, tipo TEXT DEFAULT '', inizio TEXT NOT NULL,
   fine TEXT NOT NULL, quantita REAL DEFAULT 0, stato TEXT NOT NULL, descrizione TEXT DEFAULT '',
-  particolarita TEXT DEFAULT '');
+  particolarita TEXT DEFAULT '', rif TEXT DEFAULT '');
 CREATE INDEX IF NOT EXISTS i_ass_argo ON assenze_argo(utente_id, tipo);
 CREATE INDEX IF NOT EXISTS i_rich_ut ON richieste(utente_id);
 CREATE INDEX IF NOT EXISTS i_timb ON timbrature(utente_id, quando);
@@ -308,6 +308,8 @@ def prepara_db():
         for col in ("argo_utente", "argo_letto", "argo_errore"):
             if col not in colonne:
                 c.execute(f"ALTER TABLE utenti ADD COLUMN {col} TEXT DEFAULT ''")
+        if "rif" not in {r["name"] for r in c.execute("PRAGMA table_info(assenze_argo)")}:
+            c.execute("ALTER TABLE assenze_argo ADD COLUMN rif TEXT DEFAULT ''")
         colonne = {r["name"] for r in c.execute("PRAGMA table_info(circolari)")}
         for col in ("fonte", "chiave_esterna", "categoria", "link_esterni"):
             if col not in colonne:
@@ -420,6 +422,7 @@ ARGO_PAROLE = [("festivit", "festivita"), ("motivi personali", "motivi_personali
                ("malattia del figlio", "malattia_figlio"), ("malattia figlio", "malattia_figlio"),
                ("malattia", "malattia"), ("visita", "visita_giornata")]
 ARGO_IN_ATTESA = ("FWD", "DAU", "AUT", "DSG", "REF")  # inoltrata, da autorizzare, autorizzata, vistate
+ARGO_CHIUSE = ("NUL", "NOF", "RIF", "ERR")  # annullata, annullata dopo la formalizzazione, rifiutata, errata
 
 
 def tipo_da_argo(a):
@@ -443,14 +446,23 @@ def salva_assenze_argo(c, utente_id, dati):
         return
     imp = impostazioni(c)
     c.execute("DELETE FROM assenze_argo WHERE utente_id=?", (utente_id,))
+
+    def rif_di(a):
+        """La richiesta Argo che ha generato l'assenza (stesse date), per poterla annullare come in Unica."""
+        for r in dati.get("richieste", []):
+            if (r.get("rif") and r.get("stato") not in ARGO_CHIUSE and str(r.get("inizio"))[:10] == str(a["inizio"])[:10]
+                    and str(r.get("fine") or r["inizio"])[:10] == str(a.get("fine") or a["inizio"])[:10]):
+                return json.dumps(r["rif"] | {"stato": r.get("stato")})
+        return ""
+
     for a in dati.get("assenze", []):
         if not a.get("inizio"):
             continue
         q = a.get("ore") if a.get("oraria") else a.get("giorni")
-        c.execute("INSERT INTO assenze_argo (utente_id,tipo,inizio,fine,quantita,stato,descrizione,particolarita)"
-                  " VALUES (?,?,?,?,?,?,?,?)", (utente_id, tipo_da_argo(a), a["inizio"], a.get("fine") or a["inizio"],
-                                                q or 0, "registrata", (a.get("descrizione") or "")[:200],
-                                                a.get("particolarita") or ""))
+        c.execute("INSERT INTO assenze_argo (utente_id,tipo,inizio,fine,quantita,stato,descrizione,particolarita,rif)"
+                  " VALUES (?,?,?,?,?,?,?,?,?)", (utente_id, tipo_da_argo(a), a["inizio"], a.get("fine") or a["inizio"],
+                                                  q or 0, "registrata", (a.get("descrizione") or "")[:200],
+                                                  a.get("particolarita") or "", rif_di(a)))
     for r in dati.get("richieste", []):
         if r.get("stato") not in ARGO_IN_ATTESA or not r.get("inizio"):
             continue
@@ -462,10 +474,11 @@ def salva_assenze_argo(c, utente_id, dati):
                 q = giorni_lavorativi(data(r["inizio"]), data(r.get("fine") or r["inizio"]), imp)
         except Errore:
             q = 0
-        c.execute("INSERT INTO assenze_argo (utente_id,tipo,inizio,fine,quantita,stato,descrizione,particolarita)"
-                  " VALUES (?,?,?,?,?,?,?,?)", (utente_id, tipo_da_argo(r), r["inizio"], r.get("fine") or r["inizio"],
-                                                q, "richiesta", (r.get("descrizione") or "")[:200],
-                                                r.get("particolarita") or ""))
+        c.execute("INSERT INTO assenze_argo (utente_id,tipo,inizio,fine,quantita,stato,descrizione,particolarita,rif)"
+                  " VALUES (?,?,?,?,?,?,?,?,?)", (utente_id, tipo_da_argo(r), r["inizio"], r.get("fine") or r["inizio"],
+                                                  q, "richiesta", (r.get("descrizione") or "")[:200],
+                                                  r.get("particolarita") or "",
+                                                  json.dumps(r["rif"] | {"stato": r.get("stato")}) if r.get("rif") else ""))
     c.execute("UPDATE utenti SET argo_letto=?, argo_errore='' WHERE id=?",
               (adesso().isoformat(timespec="minutes"), utente_id))
 
@@ -927,10 +940,13 @@ def utente_da_argo(c, digitato, claims):
 
 SESSIONI_DIDUP = {}  # token SmartDesk -> sessione DidUP (solo in memoria: al riavvio si rientra con Argo)
 SESSIONI_DIDUP_ERRORE = {}
+SESSIONI_PERSONALE = {}  # token SmartDesk -> sessione del programma Personale (per gli annullamenti)
 
 
-def nuova_sessione(c, user, didup=None, didup_errore=""):
+def nuova_sessione(c, user, didup=None, didup_errore="", personale=None):
     tok = secrets.token_urlsafe(32)
+    if personale:
+        SESSIONI_PERSONALE[tok] = dict(personale, utente_id=user["id"])
     if didup:
         SESSIONI_DIDUP[tok] = dict(didup, utente_id=user["id"])
     elif didup_errore:
@@ -988,7 +1004,8 @@ def api_accesso(c, u, m, corpo, q, req):
                            "richieste": len(personale.get("richieste", []))}, f, indent=1)
         except OSError:
             pass
-        return nuova_sessione(c, user, personale.get("didup"), personale.get("didup_errore", ""))
+        return nuova_sessione(c, user, personale.get("didup"), personale.get("didup_errore", ""),
+                              personale.get("sessione"))
     user = c.execute("SELECT * FROM utenti WHERE username=? AND attivo=1", (nome_ut.lower(),)).fetchone()
     if not user or not password_giusta(pw, user):
         TENTATIVI[ip] = (n + 1 if time.time() - t0 < 600 else 1, time.time())
@@ -1003,6 +1020,7 @@ def api_esci(c, u, m, corpo, q, req):
     c.execute("DELETE FROM sessioni WHERE token=?", (req.token,))
     SESSIONI_DIDUP.pop(req.token, None)
     SESSIONI_DIDUP_ERRORE.pop(req.token, None)
+    SESSIONI_PERSONALE.pop(req.token, None)
     r = Risposta(b'{"ok":true}')
     r.intestazioni["Set-Cookie"] = "sp_sessione=; Path=/; Max-Age=0"
     return r
@@ -1218,15 +1236,17 @@ def api_contatori(c, u, m, corpo, q, req):
         target = c.execute("SELECT * FROM utenti WHERE id=?", (int(q["utente"]),)).fetchone() or u
     da, a = inizio_anno(), fine_anno(oggi())
     esterne = [dict(x) for x in c.execute(
-        "SELECT id, tipo, inizio, fine, quantita, stato, descrizione FROM assenze_argo WHERE utente_id=? AND inizio>=?"
+        "SELECT id, tipo, inizio, fine, quantita, stato, descrizione, rif FROM assenze_argo WHERE utente_id=? AND inizio>=?"
         " AND inizio<=? ORDER BY inizio DESC", (target["id"], da.isoformat(), a.isoformat()))]
     for x in esterne:
         x["unita"] = TIPI[x["tipo"]]["unita"] if x["tipo"] in TIPI else "giorni"
-        rich = c.execute("SELECT id, stato FROM richieste WHERE utente_id=? AND tipo=? AND dal=? AND al=? AND "
+        x["annullabile"] = bool(x.pop("rif"))  # c'è la richiesta da cui è nata: si annulla come in Unica
+        rich = c.execute("SELECT id, stato, campi FROM richieste WHERE utente_id=? AND tipo=? AND dal=? AND al=? AND "
                          "campi LIKE '%\"origine\": \"segreteria\"%' ORDER BY id DESC",
                          (target["id"], x["tipo"] if x["tipo"] in TIPI else "generica", x["inizio"],
                           x["fine"])).fetchone()
-        x["richiesta"] = dict(rich) if rich else None
+        x["richiesta"] = {"id": rich["id"], "stato": rich["stato"],
+                          "inviata": bool(json.loads(rich["campi"] or "{}").get("inviata_argo"))} if rich else None
     return {"utente": utente_pubblico(target), "anno": nome_anno(), "contatori": contatori(c, target),
             "segreteria": {"letto": target["argo_letto"] or "", "errore": target["argo_errore"] or "",
                            "assenze": esterne}}
@@ -1370,28 +1390,62 @@ def stato_prima_annullamento(c, r):
 
 @rotta("POST", "/api/assenze-segreteria/annulla")
 def api_annulla_assenza_segreteria(c, u, m, corpo, q, req):
-    """Annullamento di un'assenza registrata dalla segreteria (letta dal programma della segreteria):
-    diventa una richiesta dello Sportello in stato «annullamento» che la segreteria conferma o no.
-    SmartDesk non modifica il programma della segreteria: lì la cancella la segreteria."""
+    """Annullamento di un'assenza letta dal programma della segreteria: come il pulsante «Annulla» di Unica,
+    la richiesta di annullamento (motivo e allegati) va al programma Personale. Si tiene anche una copia
+    in SmartDesk, in stato «annullamento», per vederla tra le proprie richieste."""
     a = c.execute("SELECT * FROM assenze_argo WHERE id=? AND utente_id=?", (int(corpo.get("id") or 0), u["id"])).fetchone()
     if not a:
         raise Errore("Assenza non trovata: rientra con le credenziali Argo per aggiornare l'elenco.", 404)
-    if a["stato"] != "registrata":
-        raise Errore("Questa richiesta è ancora in corso nel programma della segreteria: chiedi alla segreteria di ritirarla.")
-    motivo = str(corpo.get("nota") or "").strip()[:1000]
+    motivo = str(corpo.get("nota") or "").strip()
     if not motivo:
         raise Errore("Scrivi il motivo dell'annullamento.")
+    if len(motivo) > 250:
+        raise Errore(f"Il motivo può avere al massimo 250 caratteri (ne hai scritti {len(motivo)}).")
+    rif = json.loads(a["rif"]) if a["rif"] else None
+    if not rif:
+        raise Errore("Questa assenza è stata inserita direttamente dalla segreteria, senza una tua richiesta: "
+                     "nemmeno da Unica si può annullare. Chiedi alla segreteria di toglierla.")
+    files = (corpo.get("allegati") or [])[:5]
     tipo = a["tipo"] if a["tipo"] in TIPI else "generica"
-    gia = c.execute("SELECT id, stato FROM richieste WHERE utente_id=? AND tipo=? AND dal=? AND al=? AND "
-                    "stato IN ('annullamento','registrata','autorizzata') AND campi LIKE '%\"origine\": \"segreteria\"%'",
+    gia = c.execute("SELECT * FROM richieste WHERE utente_id=? AND tipo=? AND dal=? AND al=? AND "
+                    "campi LIKE '%\"origine\": \"segreteria\"%' ORDER BY id DESC",
                     (u["id"], tipo, a["inizio"], a["fine"])).fetchone()
-    if gia and gia["stato"] == "annullamento":
+    if gia and gia["stato"] == "annullamento" and json.loads(gia["campi"] or "{}").get("inviata_argo"):
         raise Errore(f"Hai già chiesto l'annullamento (richiesta n. {gia['id']}).")
+    s = SESSIONI_PERSONALE.get(req.token)
+    if not s or s.get("utente_id") != u["id"]:
+        raise Errore("Per mandare l'annullamento alla segreteria entra con le credenziali Argo "
+                     "(dopo un riavvio di SmartDesk serve un nuovo accesso).", 409)
+    # prima si controllano gli allegati, poi si manda l'annullamento
+    letti = []
+    for f in files:
+        nome = os.path.basename(str(f.get("nome") or "allegato"))[:120] or "allegato"
+        try:
+            dati = base64.b64decode(str(f.get("dati", "")).split(",")[-1], validate=False)
+        except Exception:
+            raise Errore(f"L'allegato «{nome}» non è leggibile.")
+        if not dati or len(dati) > 10 * 1024 * 1024:
+            raise Errore(f"L'allegato «{nome}» è vuoto o supera 10 MB.")
+        letti.append((nome, dati, str(f.get("mime") or mimetypes.guess_type(nome)[0] or "application/octet-stream")))
+    try:
+        esito = argo.annulla_richiesta_personale(s, rif, motivo)
+    except argo.ErroreArgo as e:
+        if "scaduta" in str(e):
+            SESSIONI_PERSONALE.pop(req.token, None)
+        raise Errore(str(e), 502)
+    non_caricati = []
+    for nome, dati, mime in letti:
+        try:
+            argo.allega_richiesta_personale(s, rif["uid"], nome, dati, mime)
+        except argo.ErroreArgo as e:
+            non_caricati.append(str(e))
     ora = adesso().isoformat()
-    campi = {"origine": "segreteria", "assenza": a["descrizione"] or TIPI[tipo]["nome"]}
+    campi = {"origine": "segreteria", "assenza": a["descrizione"] or TIPI[tipo]["nome"], "inviata_argo": True,
+             "motivo": motivo}
     if gia:
         rid = gia["id"]
-        c.execute("UPDATE richieste SET stato='annullamento', aggiornata=? WHERE id=?", (ora, rid))
+        c.execute("UPDATE richieste SET stato='annullamento', campi=?, aggiornata=? WHERE id=?",
+                  (json.dumps(campi, ensure_ascii=False), ora, rid))
     else:
         rid = c.execute("INSERT INTO richieste (utente_id,tipo,dal,al,ora_da,ora_a,quantita,campi,note,stato,creata,"
                         "aggiornata) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -1399,11 +1453,13 @@ def api_annulla_assenza_segreteria(c, u, m, corpo, q, req):
                          json.dumps(campi, ensure_ascii=False), "", "annullamento", ora, ora)).lastrowid
         c.execute("INSERT INTO storico (richiesta_id,quando,utente_id,azione,nota) VALUES (?,?,?,?,?)",
                   (rid, ora, None, "registrata", "Assenza registrata dalla segreteria"))
+    for nome, dati, mime in letti:
+        salva_allegato(c, "richiesta", rid, {"nome": nome, "mime": mime,
+                                             "dati": base64.b64encode(dati).decode()}, u["id"])
     c.execute("INSERT INTO storico (richiesta_id,quando,utente_id,azione,nota) VALUES (?,?,?,?,?)",
-              (rid, ora, u["id"], "chiedi_annullamento", motivo))
-    notifica_ruoli(c, ["segreteria"], f"{nome_completo(u)} chiede di annullare: {campi['assenza']} del "
-                   f"{it_data(a['inizio'])}", f"#/richiesta/{rid}", tranne=u["id"])
-    return {"ok": True, "id": rid}
+              (rid, ora, u["id"], "chiedi_annullamento", motivo + "\n(inviata al programma della segreteria"
+               + (f", con {len(letti) - len(non_caricati)} allegati" if letti else "") + ")"))
+    return {"ok": True, "id": rid, "messaggio": esito, "allegati_non_caricati": non_caricati}
 
 
 # ---- gestione (segreteria, DSGA, dirigente)

@@ -22,6 +22,10 @@ import server  # noqa: E402
 ERRORI = []
 
 
+def mp_att_id(cl):
+    return next(x for x in cl.chiama("/api/contatori")[1]["segreteria"]["assenze"] if x["stato"] == "richiesta")["id"]
+
+
 def controlla(cond, msg):
     print(("  ok  " if cond else "  NO  ") + msg)
     if not cond:
@@ -177,13 +181,38 @@ def avvia_finto_argo():
                      "tipoAssenza": {"codParticolarita": "FERIE", "desDescrizione": "Ferie", "codOrariaGiorn": "G"}}]}
             if servizio == "richiestascodip/search":
                 return {"data": [
-                    {"datInizio": lunedi, "datFine": lunedi, "codStato": "FWD", "codParticolarita": "MOTPERS",
+                    {"uid": "R-1314", "desNote": "", "prgReferente": 1, "uidAssenzaDef": "A-1314",
+                     "datInizio": f"{a0}-10-13", "datFine": f"{a0}-10-14", "codStato": "DEF", "codParticolarita": "MOTPERS",
+                     "desDescrizione": "Permesso per motivi personali o familiari", "desOrariaGiorn": "G"},
+                    {"uid": "R-FWD", "datInizio": lunedi, "datFine": lunedi, "codStato": "FWD", "codParticolarita": "MOTPERS",
                      "desDescrizione": "Permesso per motivi personali o familiari", "desOrariaGiorn": "G"},
                     {"datInizio": lunedi, "datFine": lunedi, "codStato": "NUL", "codParticolarita": "MOTPERS",
                      "desDescrizione": "Permesso per motivi personali o familiari", "desOrariaGiorn": "G"}]}
             return None
 
+        def personale_ok(self):
+            tok = (self.headers.get("Authorization") or "").removeprefix("Bearer PTOK-")
+            return self.headers.get("x-auth-token") == "sess-" + tok and self.headers.get("argo-client-type") == "wwp.web"
+
+        def do_PUT(self):
+            grezzo = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+            if self.path == "/personale/rest/richiestascodip/annulla/fwd" and self.personale_ok():
+                c = json.loads(grezzo)
+                if not c.get("desNoteAnnullamento") or len(c["desNoteAnnullamento"]) > 250 or c.get("uidAssenzaDef") != "A-1314":
+                    return self.manda(200, json.dumps({"success": False, "msg": "Dati non validi"}), tipo="application/json")
+                srv.annullate[c["uid"]] = c["desNoteAnnullamento"]
+                return self.manda(200, json.dumps({"success": True, "msg": "Richiesta annullata"}), tipo="application/json")
+            return self.manda(401)
+
         def do_POST(self):
+            if self.path.startswith("/personale/rest/richiestasco/uploadallegato?"):
+                corpo = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                q = parse_qs(urlparse(self.path).query)
+                if not self.personale_ok() or q.get("autore") != ["DIP"] or b"filename=" not in corpo:
+                    return self.manda(401)
+                nome = base64.b64decode(self.headers.get("X-File-Name") or "").decode()
+                srv.allegati_argo.append((q["uidRichiesta"][0], nome, int(self.headers.get("X-File-Size") or 0)))
+                return self.manda(200, json.dumps({"success": True}), tipo="application/json")
             grezzo = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
             if self.path.startswith("/wsxrest/api/rest/"):
                 r = self.didup(grezzo)
@@ -226,6 +255,7 @@ def avvia_finto_argo():
     argo.PERSONALE_API = base + "/personale/rest/"
     argo.DIDUP_API = base + "/wsxrest/api/rest/"
     srv.scaricati, srv.conferme = set(), {}
+    srv.annullate, srv.allegati_argo = {}, []
     return srv
 
 
@@ -455,24 +485,32 @@ def main():
         c0.execute("DELETE FROM richieste WHERE creata='x'")
     controlla(prima == dopo, "una richiesta dello Sportello già registrata in segreteria non si conta due volte")
     mp_reg = next(x for x in ass if x["tipo"] == "motivi_personali" and x["stato"] == "registrata")
-    mp_att = next(x for x in ass if x["stato"] == "richiesta")
+    ferie = next(x for x in ass if x["tipo"] == "ferie")
+    controlla(mp_reg["annullabile"] and not ferie["annullabile"],
+              "si riconosce quale assenza viene da una richiesta (annullabile) e quale l'ha messa la segreteria")
     s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"]})
-    controlla(s == 400 and "motivo" in e["errore"], "annullare un'assenza della segreteria: serve il motivo")
-    s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_att["id"], "nota": "x"})
-    controlla(s == 400, "una richiesta ancora in corso in segreteria non si annulla da qui")
-    s, ra = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "Giorno sbagliato"})
-    controlla(s == 200, f"annullamento chiesto per un'assenza registrata dalla segreteria ({ra})")
+    controlla(s == 400 and "motivo" in e["errore"], "annullamento: serve il motivo")
+    s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "x" * 251})
+    controlla(s == 400 and "250" in e["errore"], "motivo oltre 250 caratteri: rifiutato come in Unica")
+    s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": ferie["id"], "nota": "Giorno sbagliato"})
+    controlla(s == 400 and "segreteria" in e["errore"], "assenza inserita dalla segreteria senza richiesta: non annullabile")
+    s, ra = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "Sono venuta a scuola",
+                                                          "allegati": [{"nome": "dichiarazione.pdf", "mime": "application/pdf",
+                                                                        "dati": base64.b64encode(b"%PDF prova").decode()}]})
+    controlla(s == 200 and finto.annullate.get("R-1314") == "Sono venuta a scuola",
+              f"l'annullamento arriva al programma della segreteria come da Unica ({ra})")
+    controlla(finto.allegati_argo == [("R-1314", "dichiarazione.pdf", 10)] and not ra["allegati_non_caricati"],
+              "l'allegato arriva alla richiesta nel programma della segreteria")
+    s, det = g.chiama(f"/api/richieste/{ra['id']}")
+    controlla(det["stato"] == "annullamento" and det["campi"]["motivo"] == "Sono venuta a scuola" and len(det["allegati"]) == 1,
+              "in SmartDesk restano motivo e allegato dell'annullamento")
     s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "di nuovo"})
     controlla(s == 400 and "già chiesto" in e["errore"], "non si chiede due volte")
     ct2 = g.chiama("/api/contatori")[1]
     x2 = next(x for x in ct2["segreteria"]["assenze"] if x["id"] == mp_reg["id"])
-    controlla(x2["richiesta"] and x2["richiesta"]["stato"] == "annullamento", "l'assenza mostra l'annullamento richiesto")
+    controlla(x2["richiesta"] and x2["richiesta"]["inviata"], "l'assenza mostra l'annullamento inviato")
     mp2 = next(k for k in ct2["contatori"] if k["tipo"] == "motivi_personali")
     controlla((mp2["usati"], mp2["attesa"]) == (mp["usati"], mp["attesa"]), "i conteggi non cambiano due volte")
-    s, r2 = seg.chiama(f"/api/richieste/{ra['id']}/azione", {"azione": "nega_annullamento", "nota": "Assenza confermata"})
-    controlla(s == 200 and r2["stato"] == "registrata", "annullamento non accolto: l'assenza resta registrata")
-    s, ra2 = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_reg["id"], "nota": "Riprovo"})
-    controlla(s == 200 and ra2["id"] == ra["id"], "si può richiedere di nuovo sulla stessa richiesta")
     s, bd = g.chiama("/api/didup/bacheca")
     controlla(s == 200 and bd.get("collegata") and bd.get("da_fare") == 2,
               f"bacheca DidUP collegata all'accesso Argo: 2 da confermare ({bd.get('motivo') or bd.get('da_fare')})")
@@ -491,6 +529,9 @@ def main():
               "adesione «Aderisco» registrata")
     s, bd = g.chiama("/api/didup/bacheca")
     controlla(bd.get("da_fare") == 0, "dopo le conferme non resta niente da fare")
+    server.SESSIONI_PERSONALE.clear()
+    s, e = g.chiama("/api/assenze-segreteria/annulla", {"id": mp_att_id(g), "nota": "prova"})
+    controlla(s == 409 and "credenziali Argo" in e["errore"], "senza sessione Argo l'annullamento chiede di rientrare")
     s, e = seg.chiama("/api/didup/bacheca/11/conferma", {})
     controlla(s == 409 and "credenziali Argo" in e["errore"], "senza accesso Argo non si conferma su DidUP")
     controlla(seg.chiama("/api/didup/bacheca")[1].get("collegata") is False, "senza accesso Argo la bacheca DidUP non è collegata")
