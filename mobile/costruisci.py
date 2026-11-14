@@ -16,6 +16,11 @@ for f in ("style.css", "icona.svg"):  # stessa grafica dell'app per PC
     shutil.copy(os.path.join(RADICE, "static", f), os.path.join(OUT, "app", f))
 open(os.path.join(OUT, ".nojekyll"), "w").close()
 
+# codice del servizio Apps Script (nessun dato, nessuna password): serve per installarlo o aggiornarlo
+os.makedirs(os.path.join(OUT, "servizio"))
+shutil.copy(os.path.join(QUI, "script", "Codice.gs"), os.path.join(OUT, "servizio", "Codice.gs.txt"))
+shutil.copy(os.path.join(QUI, "script", "appsscript.json"), os.path.join(OUT, "servizio", "appsscript.json"))
+
 # versione completa per PC (server Python): solo i file del programma, mai i dati
 with zipfile.ZipFile(os.path.join(OUT, "SmartDesk-server.zip"), "w", zipfile.ZIP_DEFLATED) as z:
     for f in ("server.py", "argo.py", "README.md", "avvia.bat", "avvia-demo.bat"):
