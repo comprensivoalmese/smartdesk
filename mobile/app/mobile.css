@@ -1,0 +1,5 @@
+/* SmartDesk mobile: piccole aggiunte a style.css (stessa grafica dell'app per PC) */
+button.allegato { font: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.didup-msg button.allegato { padding: 6px 12px; font-size: .86rem; }
+.contenuto h1 { margin-top: 0; }
+.sotto { font-size: .86rem; color: var(--muted); }

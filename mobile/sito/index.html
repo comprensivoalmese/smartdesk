@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmartDesk</title>
+<meta name="description" content="SmartDesk, lo sportello del personale dell'I.C. Almese: ferie e permessi, annullamenti come in Unica e circolari DidUP in un tocco. By Wolf Team.">
+<meta name="theme-color" content="#0b0719">
+<link rel="icon" href="app/icona.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #090615; --card: rgba(26, 18, 52, .72); --text: #eeeaff; --muted: #a49bc8;
+    --line: rgba(168, 140, 255, .16); --primary: #a78bfa; --grad: linear-gradient(135deg, #6d28d9 0%, #8b5cf6 45%, #c026d3 100%);
+    --sfondo: radial-gradient(900px 600px at 85% -10%, rgba(139, 92, 246, .28), transparent 60%),
+              radial-gradient(700px 500px at -10% 30%, rgba(192, 38, 211, .14), transparent 60%),
+              linear-gradient(180deg, #0b0719 0%, #090615 100%);
+    --ombra: 0 10px 30px rgba(0, 0, 0, .35);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f4f1ff; --card: rgba(255, 255, 255, .85); --text: #1d1438; --muted: #6b5f92; --line: rgba(109, 40, 217, .16); --primary: #6d28d9;
+      --sfondo: radial-gradient(900px 600px at 85% -10%, rgba(139, 92, 246, .18), transparent 60%), linear-gradient(180deg, #f6f3ff 0%, #efe9ff 100%);
+      --ombra: 0 10px 30px rgba(76, 29, 149, .12);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); background-image: var(--sfondo); background-attachment: fixed; color: var(--text);
+         font: 16px/1.6 Inter, system-ui, sans-serif; }
+  h1, h2, h3 { font-family: 'Space Grotesk', Inter, sans-serif; line-height: 1.15; margin: 0 0 .4em; }
+  a { color: var(--primary); }
+  .pagina { max-width: 1040px; margin: 0 auto; padding: 32px 16px 48px; }
+  .eroe { display: grid; grid-template-columns: 1.3fr 1fr; gap: 28px; align-items: center; margin-bottom: 36px; }
+  .marchio { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+  .marchio img { width: 72px; height: 72px; border-radius: 18px; box-shadow: var(--ombra); }
+  .marchio h1 { font-size: 2.6rem; margin: 0; }
+  .marchio small { color: var(--muted); display: block; }
+  .lead { font-size: 1.15rem; color: var(--muted); margin: 0 0 22px; }
+  .bottoni { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 12px; font-weight: 600; text-decoration: none;
+         border: 1px solid var(--line); color: var(--text); background: var(--card); }
+  .btn.primario { background: var(--grad); color: #fff; border: 0; box-shadow: 0 8px 24px rgba(124, 58, 237, .35); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; box-shadow: var(--ombra); backdrop-filter: blur(12px); }
+  .qr { text-align: center; }
+  .qr .quadro { background: #fff; border-radius: 16px; padding: 10px; width: min(240px, 100%); margin: 0 auto 10px; }
+  .qr svg { display: block; width: 100%; height: auto; }
+  .qr p { margin: 4px 0; color: var(--muted); font-size: .92rem; }
+  .griglia { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px; }
+  .griglia h3 { font-size: 1.1rem; }
+  .griglia p { margin: 0; color: var(--muted); font-size: .95rem; }
+  .ico { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--grad); color: #fff; margin-bottom: 10px; }
+  .ico svg { width: 22px; height: 22px; }
+  .due { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 32px; }
+  ol { padding-left: 20px; margin: 0; }
+  ol li { margin-bottom: 6px; }
+  .nota { font-size: .9rem; color: var(--muted); }
+  footer { text-align: center; color: var(--muted); font-size: .9rem; margin-top: 24px; }
+  footer b { color: var(--text); }
+  @media (max-width: 820px) { .eroe, .due { grid-template-columns: 1fr; } .griglia { grid-template-columns: 1fr; } .marchio h1 { font-size: 2.1rem; } }
+</style>
+</head>
+<body>
+<div class="pagina">
+  <section class="eroe">
+    <div>
+      <div class="marchio"><img src="app/icona.svg" alt=""><div><h1>SmartDesk</h1><small>Sportello del personale · I.C. Almese</small></div></div>
+      <p class="lead">Ferie e permessi sempre aggiornati, annullamenti come in Unica e circolari DidUP confermate con un tocco.
+        Entri con le tue credenziali Argo, da telefono, tablet o computer.</p>
+      <div class="bottoni">
+        <a class="btn primario" href="app/">Apri SmartDesk</a>
+        <a class="btn" href="app/?prova">Prova senza Argo</a>
+      </div>
+    </div>
+    <div class="card qr">
+      <div class="quadro" id="qr"></div>
+      <p><b>Inquadra con il telefono</b></p>
+      <p id="qr-url"></p>
+    </div>
+  </section>
+
+  <section class="griglia">
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></div>
+      <h3>Ferie e permessi</h3><p>I giorni usati e quelli rimasti, letti dal programma della segreteria: motivi personali, festività, ferie, permessi brevi.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></div>
+      <h3>Annullamenti</h3><p>Annulli una richiesta già registrata, con motivo e allegati: arriva alla segreteria come da Unica.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/></svg></div>
+      <h3>Circolari DidUP</h3><p>Presa visione e adesioni con un tocco (anche tutte insieme), con le scadenze in giallo, arancio e rosso.</p></div>
+  </section>
+
+  <section class="due">
+    <div class="card"><h2>Installala come un'app</h2><ol>
+      <li><b>Android:</b> apri SmartDesk con Chrome, menu ⋮ → <i>Installa app</i> (o <i>Aggiungi a schermata Home</i>).</li>
+      <li><b>iPhone e iPad:</b> apri SmartDesk con Safari, pulsante Condividi → <i>Aggiungi alla schermata Home</i>.</li>
+      <li><b>Computer:</b> con Chrome o Edge, l'icona <i>Installa</i> nella barra dell'indirizzo.</li></ol>
+      <p class="nota">Non serve nessun download: l'app si aggiorna da sola.</p></div>
+    <div class="card"><h2>La tua password</h2>
+      <p>SmartDesk entra in Argo al posto tuo, come fanno Unica e DidUP, attraverso il servizio della scuola su Google.
+        La password serve solo per entrare: non viene salvata da nessuna parte. Possono entrare solo gli account della scuola.</p>
+      <p class="nota">Per le scuole e i tecnici: c'è anche la <a href="SmartDesk-server.zip">versione completa per PC</a>
+        (sportello con richieste, gestione e timbrature; serve Python 3, si avvia con <i>avvia.bat</i>).</p></div>
+  </section>
+
+  <footer>SmartDesk · sviluppata dal <b>Wolf Team</b> dell'Istituto Comprensivo di Almese · © 2026</footer>
+</div>
+<script src="qrcode.js"></script>
+<script>
+  (function () {
+    var url = new URL('app/', location.href).href;
+    document.getElementById('qr-url').textContent = url.replace(/^https?:\/\//, '');
+    try {
+      var q = qrcode(0, 'M'); q.addData(url); q.make();
+      document.getElementById('qr').innerHTML = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+    } catch (e) { document.getElementById('qr').textContent = url; }
+  })();
+</script>
+</body>
+</html>
